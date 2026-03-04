@@ -29,6 +29,279 @@ MAX_AGE_DAYS = 7
 MIN_REFRESH_SUCCESS_RATIO = 0.25
 
 
+def _apply_premium_theme() -> None:
+    st.markdown(
+        """
+        <style>
+        :root {
+            --bg-0: #071225;
+            --bg-1: #0b1a33;
+            --bg-2: #0f2745;
+            --surface: #0c1b32;
+            --surface-2: #0f223d;
+            --border: #1c3a63;
+            --text: #e8f1ff;
+            --muted: #9db3d6;
+            --accent-cyan: #2ec5ff;
+            --accent-teal: #27d4a6;
+            --accent-orange: #ff9f43;
+            --shadow: 0 12px 26px rgba(2, 8, 20, 0.40);
+        }
+
+        .stApp {
+            background:
+                radial-gradient(1200px 700px at 0% 0%, #154b79 0%, transparent 50%),
+                radial-gradient(1000px 700px at 100% 0%, #1ea38e 0%, transparent 45%),
+                linear-gradient(165deg, var(--bg-0) 10%, var(--bg-1) 50%, var(--bg-2) 100%);
+            color: var(--text);
+        }
+
+        .block-container {
+            max-width: none;
+            width: 100%;
+            padding-top: 8rem;
+            padding-bottom: 1rem;
+            padding-left: 1.25rem;
+            padding-right: 1.25rem;
+        }
+
+        [data-testid="stHeader"] {
+            background: linear-gradient(90deg, rgba(8, 18, 36, 0.95), rgba(14, 48, 77, 0.92));
+            border-bottom: 1px solid #28496f;
+            backdrop-filter: blur(6px);
+            min-height: 86px;
+        }
+
+        [data-testid="stHeader"]::before {
+            content: "Intelligent Investment Assistant";
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            color: #e8f1ff;
+            font-weight: 800;
+            font-size: 3rem;
+            letter-spacing: 0.35px;
+            text-align: center;
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        [data-testid="stToolbar"] button,
+        [data-testid="stToolbar"] svg,
+        [data-testid="stToolbar"] span,
+        [data-testid="stToolbar"] div {
+            color: #d7e8ff !important;
+            fill: #d7e8ff !important;
+        }
+
+        h1, h2, h3, h4 {
+            color: var(--text);
+        }
+
+        .stApp, .stApp p, .stApp label, .stApp span, .stApp small {
+            color: var(--text);
+        }
+
+        [data-testid="stCaptionContainer"] {
+            color: var(--muted) !important;
+        }
+
+        [data-testid="stHorizontalBlock"] > div:has([data-testid="stTextInput"]),
+        [data-testid="stHorizontalBlock"] > div:has([data-testid="stSelectbox"]),
+        [data-testid="stHorizontalBlock"] > div:has([data-testid="stMultiSelect"]),
+        [data-testid="stHorizontalBlock"] > div:has([data-testid="stNumberInput"]),
+        [data-testid="stHorizontalBlock"] > div:has([data-testid="stSlider"]),
+        [data-testid="stHorizontalBlock"] > div:has([data-testid="stCheckbox"]),
+        [data-testid="stHorizontalBlock"] > div:has([data-testid="stButton"]) {
+            background: linear-gradient(180deg, rgba(12, 27, 50, 0.93), rgba(12, 27, 50, 0.82));
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 10px 12px 12px 12px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(6px);
+            min-height: 92px;
+        }
+
+        [data-testid="stExpander"] {
+            background: linear-gradient(180deg, rgba(12, 27, 50, 0.93), rgba(12, 27, 50, 0.82));
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            box-shadow: var(--shadow);
+        }
+
+        [data-testid="stTextInput"] input,
+        [data-testid="stNumberInput"] input,
+        [data-testid="stSelectbox"] > div > div,
+        [data-testid="stMultiSelect"] > div > div {
+            background: #102746 !important;
+            border: 1px solid #244670 !important;
+            border-radius: 10px !important;
+            color: var(--text) !important;
+        }
+
+        [data-testid="stSelectbox"] *[data-baseweb="select"] span,
+        [data-testid="stMultiSelect"] *[data-baseweb="select"] span {
+            color: var(--text) !important;
+        }
+
+        /* BaseWeb popover menu (select/multiselect options) */
+        div[data-baseweb="popover"] ul,
+        div[data-baseweb="popover"] li,
+        div[data-baseweb="popover"] [role="option"] {
+            background: #102746 !important;
+            color: #dce9ff !important;
+        }
+
+        div[data-baseweb="popover"] [role="option"][aria-selected="true"] {
+            background: #17355a !important;
+            color: #f2f7ff !important;
+        }
+
+        div[data-baseweb="popover"] [role="option"]:hover {
+            background: #1a3b63 !important;
+            color: #ffffff !important;
+        }
+
+        [data-testid="stTextInput"] input::placeholder {
+            color: #7f98bd !important;
+        }
+
+        [data-testid="stButton"] > button {
+            background: linear-gradient(135deg, #1ea8ff, #2fd7b0);
+            color: #041224;
+            border: none;
+            border-radius: 10px;
+            font-weight: 700;
+            min-height: 42px;
+            box-shadow: 0 6px 14px rgba(16, 158, 220, 0.22);
+        }
+
+        [data-testid="stButton"] > button:hover {
+            filter: brightness(1.05);
+            transform: translateY(-1px);
+        }
+
+        [data-testid="stCheckbox"] label {
+            color: #c7daf6 !important;
+        }
+
+        [data-testid="stSlider"] * {
+            color: #c9ddfb !important;
+        }
+
+        [data-testid="stDataFrame"] {
+            border: 1px solid #b8c6dc;
+            border-radius: 14px;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            background: #ffffff;
+        }
+
+        [data-testid="stDataFrame"] thead th,
+        [data-testid="stDataFrame"] [role="columnheader"] {
+            font-weight: 900 !important;
+            color: #0a0f18 !important;
+            background: #f0f4fa !important;
+            border-bottom: 1px solid #d5e0ee !important;
+        }
+
+        [data-testid="stDataFrame"] [role="columnheader"] *,
+        [data-testid="stDataFrame"] [role="columnheader"] div,
+        [data-testid="stDataFrame"] [role="columnheader"] span {
+            font-weight: 900 !important;
+            color: #0a0f18 !important;
+        }
+
+        [data-testid="stDataFrame"] td,
+        [data-testid="stDataFrame"] th,
+        [data-testid="stDataFrame"] span,
+        [data-testid="stDataFrame"] div {
+            color: #060b12 !important;
+        }
+
+        [data-testid="stDataFrame"] tbody tr {
+            background: #ffffff !important;
+        }
+
+        [data-testid="stDataFrame"] tbody tr:nth-child(even) {
+            background: #f9fbff !important;
+        }
+
+        [data-testid="stDataFrame"] td {
+            border-top: 1px solid #e2e8f2 !important;
+        }
+
+        [data-testid="stDataFrame"] td:has(span[title="None"]),
+        [data-testid="stDataFrame"] td:has(div[title="None"]) {
+            color: #7f8fa8 !important;
+        }
+
+        [data-testid="stTabs"] [data-baseweb="tab-list"] {
+            gap: 10px;
+            margin-bottom: 0.7rem;
+        }
+
+        [data-testid="stTabs"] [data-baseweb="tab"] {
+            border-radius: 999px;
+            border: 1px solid #2a4d79;
+            background: #102746;
+            color: #c2d7f7;
+            padding: 8px 16px;
+            font-weight: 600;
+        }
+
+        [data-testid="stTabs"] [aria-selected="true"] {
+            background: linear-gradient(135deg, rgba(46, 197, 255, 0.2), rgba(39, 212, 166, 0.2));
+            border-color: #41cde8 !important;
+            color: #e8f7ff !important;
+            box-shadow: 0 8px 20px rgba(46, 197, 255, 0.2);
+        }
+
+        .stAlert {
+            border-radius: 12px;
+            border: 1px solid #27507e;
+            background: rgba(16, 39, 70, 0.9);
+        }
+
+        .stDivider {
+            border-top: 1px solid #28496f;
+        }
+
+        .ii-table-wrap {
+            max-height: 500px;
+            overflow: auto;
+            border: 1px solid #b8c6dc;
+            border-radius: 14px;
+            box-shadow: var(--shadow);
+            background: #ffffff;
+        }
+
+        .ii-table-wrap table {
+            width: 100%;
+        }
+
+        .ii-table-wrap thead th {
+            color: #05070b !important;
+            font-weight: 900 !important;
+            background: #edf3fb !important;
+        }
+
+        .ii-table-wrap tbody td {
+            color: #04070d !important;
+            font-weight: 500 !important;
+            background: transparent !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+_apply_premium_theme()
+
+
 @dataclass(frozen=True)
 class StockUpdateResult:
     data: pd.DataFrame
@@ -72,6 +345,56 @@ def _ensure_stock_schema(df: pd.DataFrame) -> pd.DataFrame:
         pd.to_numeric(out["EBITDA_Margin"], errors="coerce") * 100.0
     )
     return out
+
+
+def _styled_table(df: pd.DataFrame):
+    show = df.copy()
+    numeric_cols = show.select_dtypes(include=["number"]).columns.tolist()
+    fmt = {c: "{:,.2f}" for c in numeric_cols}
+
+    styler = show.style.format(fmt, na_rep="-").set_table_styles(
+        [
+            {
+                "selector": "th",
+                "props": [
+                    ("background-color", "#f0f4fa"),
+                    ("color", "#0a0f18"),
+                    ("font-weight", "900"),
+                    ("border-bottom", "1px solid #d5e0ee"),
+                    ("border-right", "1px solid #d5e0ee"),
+                    ("padding", "10px 8px"),
+                ],
+            },
+            {
+                "selector": "td",
+                "props": [
+                    ("color", "#04070d"),
+                    ("font-weight", "500"),
+                    ("border-color", "#d9e4f2"),
+                    ("padding", "8px"),
+                ],
+            },
+            {
+                "selector": "table",
+                "props": [
+                    ("border-collapse", "collapse"),
+                    ("border", "1px solid #c4d4e8"),
+                    ("font-size", "14px"),
+                ],
+            },
+        ]
+    )
+    styler = styler.set_properties(**{"color": "#04070d", "font-weight": "500"})
+    styler = styler.apply(
+        lambda row: ["background-color: #f4f8ff" if (row.name % 2 == 1) else "background-color: #ffffff" for _ in row],
+        axis=1,
+    )
+    return styler
+
+
+def _render_styled_table(df: pd.DataFrame) -> None:
+    styler = _styled_table(df).hide(axis="index")
+    st.markdown(f'<div class="ii-table-wrap">{styler.to_html()}</div>', unsafe_allow_html=True)
 
 
 def _update_stock_cache(cache_path: str, health_report_path: str, universe: str, include_metadata: bool) -> StockUpdateResult:
@@ -120,11 +443,19 @@ def _show_stock_tab() -> None:
     telemetry_text = ""
     left, mid, right = st.columns([2.3, 1.0, 1.4], vertical_alignment="bottom")
     with left:
-        universe = st.selectbox("Universe", STOCK_UNIVERSE_OPTIONS, index=0, key="stock_universe")
+        st.caption("Universe")
+        universe = st.selectbox(
+            "Universe",
+            STOCK_UNIVERSE_OPTIONS,
+            index=0,
+            key="stock_universe",
+            label_visibility="collapsed",
+        )
     with mid:
+        st.caption(" ")
         include_metadata = st.checkbox("Enrich metadata (slower)", value=False, key="stock_enrich")
     with right:
-        st.markdown("&nbsp;", unsafe_allow_html=True)
+        st.caption(" ")
         force_refresh = st.button("Refresh Stock Data", use_container_width=True, key="stock_refresh")
 
     cache_path, health_report_path = _stock_paths(universe)
@@ -321,7 +652,7 @@ def _show_stock_tab() -> None:
         ]
     ]
     st.write(f"Matches: {len(df_show):,}")
-    st.dataframe(df_show, use_container_width=True, height=500, hide_index=True)
+    _render_styled_table(df_show)
 
     ticker = st.selectbox("Ticker details", options=[""] + df["Ticker"].astype(str).tolist(), index=0, key="stock_detail_ticker")
     if ticker:
@@ -349,9 +680,16 @@ def _show_fixed_income_tab() -> None:
     telemetry_text = ""
     left, right = st.columns([2.3, 1.4], vertical_alignment="bottom")
     with left:
-        universe = st.selectbox("Universe", FI_UNIVERSE_OPTIONS, index=0, key="fi_universe")
+        st.caption("Universe")
+        universe = st.selectbox(
+            "Universe",
+            FI_UNIVERSE_OPTIONS,
+            index=0,
+            key="fi_universe",
+            label_visibility="collapsed",
+        )
     with right:
-        st.markdown("&nbsp;", unsafe_allow_html=True)
+        st.caption(" ")
         force_refresh = st.button("Refresh Fixed-Income Data", use_container_width=True, key="fi_refresh")
 
     cache_path, health_report_path = _fi_paths(universe)
@@ -427,7 +765,7 @@ def _show_fixed_income_tab() -> None:
         ]
     ]
     st.write(f"Matches: {len(show):,}")
-    st.dataframe(show, use_container_width=True, height=500, hide_index=True)
+    _render_styled_table(show)
 
     detail_symbol = st.selectbox("Instrument details", options=[""] + df["Symbol"].astype(str).tolist(), index=0, key="fi_detail")
     if detail_symbol:
