@@ -59,8 +59,64 @@ class RefreshResult:
     errors_sample: list[str]
 
 
+@dataclass(frozen=True)
+class FixedIncomeRefreshResult:
+    data: pd.DataFrame
+    requested_count: int
+    success_count: int
+    failure_count: int
+    rate_limited: bool
+    errors_sample: list[str]
+
+
+FI_SCHEMA_COLUMNS = [
+    "Symbol",
+    "Name",
+    "Universe",
+    "Type",
+    "Price",
+    "Yield_Pct",
+    "Duration_Years",
+    "Maturity_Bucket",
+    "Expense_Ratio_Pct",
+    "AUM",
+]
+
+FI_NUMERIC_COLUMNS = [
+    "Price",
+    "Yield_Pct",
+    "Duration_Years",
+    "Expense_Ratio_Pct",
+    "AUM",
+]
+
+TREASURY_ETF_INSTRUMENTS = [
+    {"Symbol": "BIL", "Name": "SPDR Bloomberg 1-3 Month T-Bill ETF", "Duration_Years": 0.10, "Maturity_Bucket": "0-1Y"},
+    {"Symbol": "SGOV", "Name": "iShares 0-3 Month Treasury Bond ETF", "Duration_Years": 0.12, "Maturity_Bucket": "0-1Y"},
+    {"Symbol": "SHY", "Name": "iShares 1-3 Year Treasury Bond ETF", "Duration_Years": 1.90, "Maturity_Bucket": "1-3Y"},
+    {"Symbol": "IEI", "Name": "iShares 3-7 Year Treasury Bond ETF", "Duration_Years": 4.40, "Maturity_Bucket": "3-7Y"},
+    {"Symbol": "IEF", "Name": "iShares 7-10 Year Treasury Bond ETF", "Duration_Years": 7.30, "Maturity_Bucket": "7-10Y"},
+    {"Symbol": "TLT", "Name": "iShares 20+ Year Treasury Bond ETF", "Duration_Years": 16.40, "Maturity_Bucket": "20Y+"},
+    {"Symbol": "GOVT", "Name": "iShares U.S. Treasury Bond ETF", "Duration_Years": 6.00, "Maturity_Bucket": "3-7Y"},
+]
+
+BOND_ETF_INSTRUMENTS = [
+    {"Symbol": "AGG", "Name": "iShares Core U.S. Aggregate Bond ETF", "Duration_Years": 6.20, "Maturity_Bucket": "3-7Y"},
+    {"Symbol": "BND", "Name": "Vanguard Total Bond Market ETF", "Duration_Years": 6.10, "Maturity_Bucket": "3-7Y"},
+    {"Symbol": "LQD", "Name": "iShares iBoxx Investment Grade Corporate Bond ETF", "Duration_Years": 8.40, "Maturity_Bucket": "7-10Y"},
+    {"Symbol": "HYG", "Name": "iShares iBoxx High Yield Corporate Bond ETF", "Duration_Years": 3.20, "Maturity_Bucket": "3-7Y"},
+    {"Symbol": "JNK", "Name": "SPDR Bloomberg High Yield Bond ETF", "Duration_Years": 3.40, "Maturity_Bucket": "3-7Y"},
+    {"Symbol": "VCIT", "Name": "Vanguard Intermediate-Term Corporate Bond ETF", "Duration_Years": 6.20, "Maturity_Bucket": "3-7Y"},
+    {"Symbol": "BNDX", "Name": "Vanguard Total International Bond ETF", "Duration_Years": 7.00, "Maturity_Bucket": "7-10Y"},
+]
+
+
 def _empty_schema_df() -> pd.DataFrame:
     return pd.DataFrame(columns=SCHEMA_COLUMNS)
+
+
+def _empty_fixed_income_df() -> pd.DataFrame:
+    return pd.DataFrame(columns=FI_SCHEMA_COLUMNS)
 
 
 def _chunks(items: list[str], size: int) -> list[list[str]]:
@@ -274,6 +330,142 @@ def fetch_universe_tickers(universe: str) -> list[str]:
     if u in {"nasdaq 100", "nasdaq-100", "ndx"}:
         return fetch_nasdaq100_tickers()
     raise ValueError(f"Unsupported universe: {universe}")
+
+
+def fetch_fixed_income_universe_instruments(universe: str) -> list[dict[str, object]]:
+    u = (universe or "").strip().lower()
+    if u in {"us treasuries", "treasury", "treasuries"}:
+        return [{**dict(x), "Universe": "US Treasuries", "Type": "Treasury ETF"} for x in TREASURY_ETF_INSTRUMENTS]
+    if u in {"bond etfs", "bond etf", "etf"}:
+        return [{**dict(x), "Universe": "Bond ETFs", "Type": "Bond ETF"} for x in BOND_ETF_INSTRUMENTS]
+    raise ValueError(f"Unsupported fixed-income universe: {universe}")
+
+
+def _safe_pct(v: object) -> float | None:
+    if v is None:
+        return None
+    try:
+        fv = float(v)
+    except Exception:
+        return None
+    if pd.isna(fv):
+        return None
+    if 0.0 <= fv <= 1.0:
+        return fv * 100.0
+    return fv
+
+
+def refresh_fixed_income_yfinance(instruments: list[dict[str, object]]) -> FixedIncomeRefreshResult:
+    import yfinance as yf
+
+    requested = len(instruments)
+    if requested == 0:
+        return FixedIncomeRefreshResult(
+            data=_empty_fixed_income_df(),
+            requested_count=0,
+            success_count=0,
+            failure_count=0,
+            rate_limited=False,
+            errors_sample=[],
+        )
+
+    rows: list[dict[str, object]] = []
+    errors_sample: list[str] = []
+    saw_rate_limit = False
+
+    for inst in instruments:
+        symbol = str(inst.get("Symbol") or "").strip().upper()
+        if not symbol:
+            continue
+
+        try:
+            stock = yf.Ticker(symbol)
+            fi = None
+            info = None
+            try:
+                fi = stock.fast_info
+            except Exception:
+                fi = None
+            try:
+                info = stock.get_info() or {}
+            except Exception:
+                info = {}
+
+            price = None
+            if fi is not None:
+                price = fi.get("last_price")
+            if price is None:
+                price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose")
+            if price is None:
+                try:
+                    hist = stock.history(period="5d")
+                    if hist is not None and not hist.empty and "Close" in hist.columns:
+                        price = float(hist["Close"].iloc[-1])
+                except Exception:
+                    price = None
+
+            yld = _safe_pct(
+                info.get("yield")
+                or info.get("trailingAnnualDividendYield")
+                or info.get("distributionYield")
+                or info.get("secYield")
+            )
+            expense = _safe_pct(info.get("annualReportExpenseRatio") or info.get("expenseRatio"))
+            duration = info.get("effectiveDuration") or inst.get("Duration_Years")
+            aum = info.get("totalAssets") or info.get("fundAssets")
+
+            rows.append(
+                {
+                    "Symbol": symbol,
+                    "Name": info.get("longName") or inst.get("Name"),
+                    "Universe": str(inst.get("Universe") or ""),
+                    "Type": str(inst.get("Type") or "ETF"),
+                    "Price": price,
+                    "Yield_Pct": yld,
+                    "Duration_Years": duration,
+                    "Maturity_Bucket": inst.get("Maturity_Bucket"),
+                    "Expense_Ratio_Pct": expense,
+                    "AUM": aum,
+                }
+            )
+        except Exception as e:
+            if _is_rate_limited_error(e):
+                saw_rate_limit = True
+            if len(errors_sample) < MAX_ERROR_SAMPLES:
+                errors_sample.append(f"{symbol}: {e}")
+            rows.append(
+                {
+                    "Symbol": symbol,
+                    "Name": inst.get("Name"),
+                    "Universe": str(inst.get("Universe") or ""),
+                    "Type": str(inst.get("Type") or "ETF"),
+                    "Price": None,
+                    "Yield_Pct": None,
+                    "Duration_Years": inst.get("Duration_Years"),
+                    "Maturity_Bucket": inst.get("Maturity_Bucket"),
+                    "Expense_Ratio_Pct": None,
+                    "AUM": None,
+                }
+            )
+
+    data = pd.DataFrame(rows, columns=FI_SCHEMA_COLUMNS)
+    for col in FI_NUMERIC_COLUMNS:
+        data[col] = pd.to_numeric(data[col], errors="coerce")
+
+    success_count = 0
+    if not data.empty:
+        success_mask = data[["Price", "Yield_Pct", "Duration_Years"]].notna().any(axis=1)
+        success_count = int(success_mask.sum())
+    failure_count = max(requested - success_count, 0)
+
+    return FixedIncomeRefreshResult(
+        data=data,
+        requested_count=requested,
+        success_count=success_count,
+        failure_count=failure_count,
+        rate_limited=saw_rate_limit,
+        errors_sample=errors_sample,
+    )
 
 
 def refresh_fundamentals_yfinance(tickers: list[str], include_metadata: bool = False) -> RefreshResult:

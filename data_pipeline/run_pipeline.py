@@ -15,11 +15,25 @@ from data_pipeline.cache_manager import (
     write_json_report,
 )
 from data_pipeline.data_fetcher import SCHEMA_COLUMNS, fetch_universe_tickers, refresh_fundamentals_yfinance
+from data_pipeline.data_fetcher import (
+    FI_SCHEMA_COLUMNS,
+    fetch_fixed_income_universe_instruments,
+    refresh_fixed_income_yfinance,
+)
 from data_pipeline.data_health_report import summarize_refresh_outcome
 
 
 @dataclass(frozen=True)
 class PipelineRunResult:
+    data: pd.DataFrame
+    wrote_cache: bool
+    cache_path: str
+    health_report_path: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class FixedIncomePipelineRunResult:
     data: pd.DataFrame
     wrote_cache: bool
     cache_path: str
@@ -109,6 +123,97 @@ def run_stock_fundamentals_pipeline(
             )
 
     return PipelineRunResult(
+        data=df,
+        wrote_cache=wrote_cache,
+        cache_path=cache_path,
+        health_report_path=health_report_path,
+        reason=reason,
+    )
+
+
+def run_fixed_income_pipeline(
+    *,
+    cache_path: str = "data/fixed_income_cache.parquet",
+    max_age_days: float = 7.0,
+    universe: str = "US Treasuries",
+    instruments: Optional[list[dict[str, object]]] = None,
+    min_refresh_success_ratio: float = 0.25,
+    health_report_path: str = "data/fixed_income_health_report.json",
+) -> FixedIncomePipelineRunResult:
+    status = get_cache_status(cache_path, max_age_days, required_columns=FI_SCHEMA_COLUMNS)
+
+    cached_df = None
+    if status.exists and status.schema_ok and status.is_fresh:
+        cached_df, _err = read_parquet_safe(cache_path)
+        if cached_df is not None:
+            return FixedIncomePipelineRunResult(
+                data=cached_df,
+                wrote_cache=False,
+                cache_path=cache_path,
+                health_report_path=health_report_path,
+                reason="used fresh cache",
+            )
+
+    if instruments is None:
+        instruments = fetch_fixed_income_universe_instruments(universe)
+
+    refresh = refresh_fixed_income_yfinance(instruments)
+
+    df = refresh.data.copy()
+    for col in FI_SCHEMA_COLUMNS:
+        if col not in df.columns:
+            df[col] = None
+    df = df[FI_SCHEMA_COLUMNS]
+
+    eligible = True
+    reason = "cache updated"
+    schema_ok, missing_cols = validate_schema_columns(df, FI_SCHEMA_COLUMNS)
+    if not schema_ok:
+        eligible = False
+        reason = f"missing required columns: {', '.join(missing_cols)}"
+    elif df.empty:
+        eligible = False
+        reason = "no rows returned from refresh"
+    elif refresh.requested_count > 0:
+        ratio = refresh.success_count / refresh.requested_count
+        if ratio < min_refresh_success_ratio:
+            eligible = False
+            reason = f"success ratio {ratio:.1%} below threshold {min_refresh_success_ratio:.0%}"
+
+    wrote_cache = False
+    if eligible:
+        ensure_parent_dir(cache_path)
+        save_parquet_atomic(df, cache_path)
+        wrote_cache = True
+
+    ensure_parent_dir(health_report_path)
+    report = summarize_refresh_outcome(
+        df=df,
+        requested_count=refresh.requested_count,
+        success_count=refresh.success_count,
+        failure_count=refresh.failure_count,
+        rate_limited=refresh.rate_limited,
+        errors_sample=refresh.errors_sample,
+        universe=universe,
+        cache_path=cache_path,
+        cache_written=wrote_cache,
+        notes=reason,
+        core_fields=("Price", "Yield_Pct", "Duration_Years", "Expense_Ratio_Pct", "AUM"),
+    )
+    write_json_report(report.to_dict(), health_report_path)
+
+    if not wrote_cache and status.exists:
+        stale_df, _err = read_parquet_safe(cache_path)
+        if stale_df is not None and not stale_df.empty:
+            return FixedIncomePipelineRunResult(
+                data=stale_df,
+                wrote_cache=False,
+                cache_path=cache_path,
+                health_report_path=health_report_path,
+                reason=f"refresh not eligible: {reason}. used stale cache",
+            )
+
+    return FixedIncomePipelineRunResult(
         data=df,
         wrote_cache=wrote_cache,
         cache_path=cache_path,
