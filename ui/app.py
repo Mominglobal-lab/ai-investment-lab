@@ -16,14 +16,13 @@ try:
 except Exception:
     AGGRID_AVAILABLE = False
 
-from cache_manager import (
+from data_pipeline.cache_manager import (
     get_cache_status,
     save_parquet_atomic,
     write_json_report,
     read_parquet_safe,
-    validate_schema_columns,
 )
-from data_fetcher import (
+from data_pipeline.data_fetcher import (
     SCHEMA_COLUMNS,
     fetch_sp500_tickers,
     fetch_ticker_details,
@@ -235,7 +234,7 @@ with right:
     schema_text = "Schema OK" if status.schema_ok else "Schema mismatch"
     st.write(f"{cache_text}  |  {fresh_text}  |  {schema_text}")
     enrich_metadata = st.checkbox("Enrich metadata (slower)", value=False)
-    force_refresh = st.button("Refresh Data", width="stretch")
+    force_refresh = st.button("Refresh Data", use_container_width=True)
 
 st.divider()
 
@@ -301,7 +300,7 @@ filters_col, results_col, details_col = st.columns([1.1, 2.4, 1.2], gap="large")
 
 with filters_col:
     st.markdown("### Filters")
-    if st.button("Reset Filters", width="stretch"):
+    if st.button("Reset Filters", use_container_width=True):
         for k, v in FILTER_DEFAULTS.items():
             st.session_state[k] = v
         st.rerun()
@@ -432,7 +431,7 @@ with results_col:
             theme="streamlit",
         )
     else:
-        st.dataframe(df_display, width="stretch", height=560, hide_index=True)
+        st.dataframe(df_display, use_container_width=True, height=560, hide_index=True)
         st.caption("Tip: install streamlit-aggrid to pin Ticker/Company while scrolling.")
 
     csv_bytes = df_display.to_csv(index=False).encode("utf-8")
@@ -441,13 +440,13 @@ with results_col:
         data=csv_bytes,
         file_name="stock_screener_results.csv",
         mime="text/csv",
-        width="stretch",
+        use_container_width=True,
     )
 
 with details_col:
     st.markdown("### Details")
     lookup = st.text_input("Lookup ticker", value=safe_str(st.session_state.get("selected_ticker"))).strip().upper()
-    if st.button("Get Ticker Detail", width="stretch") and lookup:
+    if st.button("Get Ticker Detail", use_container_width=True) and lookup:
         st.session_state["selected_ticker"] = lookup
 
     t = st.session_state.get("selected_ticker")

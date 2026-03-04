@@ -6,7 +6,7 @@ from typing import Optional
 
 import pandas as pd
 
-from cache_manager import (
+from data_pipeline.cache_manager import (
     ensure_parent_dir,
     get_cache_status,
     read_parquet_safe,
@@ -14,7 +14,7 @@ from cache_manager import (
     validate_schema_columns,
     write_json_report,
 )
-from data_fetcher import SCHEMA_COLUMNS, fetch_sp500_tickers, refresh_fundamentals_yfinance
+from data_pipeline.data_fetcher import SCHEMA_COLUMNS, fetch_sp500_tickers, refresh_fundamentals_yfinance
 from data_pipeline.data_health_report import summarize_refresh_outcome
 
 
@@ -36,7 +36,7 @@ def run_stock_fundamentals_pipeline(
     min_refresh_success_ratio: float = 0.25,
     health_report_path: str = "data/fundamentals_health_report.json",
 ) -> PipelineRunResult:
-    status = get_cache_status(cache_path, max_age_days)
+    status = get_cache_status(cache_path, max_age_days, required_columns=SCHEMA_COLUMNS)
 
     cached_df = None
     if status.exists and status.schema_ok and status.is_fresh:

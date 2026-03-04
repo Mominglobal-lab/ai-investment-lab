@@ -146,7 +146,8 @@ def _fetch_fast_stage(batch: list[str], tickers_obj, include_metadata: bool) -> 
                 "PEG_Ratio": None,
                 "Rule_of_40": None,
             }
-            fallback_needed.append(t)
+            if include_metadata:
+                fallback_needed.append(t)
         except Exception as e:
             fallback_needed.append(t)
             if _is_rate_limited_error(e):
@@ -217,7 +218,7 @@ def fetch_sp500_tickers() -> list[str]:
         raise RuntimeError("Unable to fetch S&P 500 ticker list from all sources")
 
 
-def refresh_fundamentals_yfinance(tickers: list[str]) -> RefreshResult:
+def refresh_fundamentals_yfinance(tickers: list[str], include_metadata: bool = False) -> RefreshResult:
     import yfinance as yf
 
     clean_tickers = [t for t in tickers if isinstance(t, str) and t.strip()]
