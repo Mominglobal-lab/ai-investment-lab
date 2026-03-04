@@ -59,7 +59,7 @@ def _apply_premium_theme() -> None:
         .block-container {
             max-width: none;
             width: 100%;
-            padding-top: 8rem;
+            padding-top: 5.2rem;
             padding-bottom: 1rem;
             padding-left: 1.25rem;
             padding-right: 1.25rem;
@@ -240,7 +240,16 @@ def _apply_premium_theme() -> None:
 
         [data-testid="stTabs"] [data-baseweb="tab-list"] {
             gap: 10px;
-            margin-bottom: 0.7rem;
+            margin-bottom: 0.15rem;
+        }
+
+        [data-testid="stTabs"] {
+            margin-top: 0 !important;
+            padding-top: 0 !important;
+        }
+
+        [data-testid="stTabs"] [data-baseweb="tab-panel"] {
+            padding-top: 0.15rem !important;
         }
 
         [data-testid="stTabs"] [data-baseweb="tab"] {
