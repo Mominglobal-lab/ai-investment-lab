@@ -146,7 +146,9 @@ def _fetch_fast_stage(batch: list[str], tickers_obj, include_metadata: bool) -> 
                 "PEG_Ratio": None,
                 "Rule_of_40": None,
             }
-            if include_metadata:
+            # Fall back to full fetch when metadata is requested OR
+            # when fast fields are missing for this symbol.
+            if include_metadata or close is None or mcap is None:
                 fallback_needed.append(t)
         except Exception as e:
             fallback_needed.append(t)
@@ -216,6 +218,62 @@ def fetch_sp500_tickers() -> list[str]:
     except Exception as e:
         logger.error("Fallback S&P source failed: %s", e)
         raise RuntimeError("Unable to fetch S&P 500 ticker list from all sources")
+
+
+def fetch_nasdaq100_tickers() -> list[str]:
+    wiki_url = "https://en.wikipedia.org/wiki/Nasdaq-100"
+    fallback_url = "https://en.wikipedia.org/wiki/NASDAQ-100"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        )
+    }
+
+    def _extract_symbols(tables: list[pd.DataFrame]) -> list[str]:
+        for df in tables:
+            cols = {str(c).strip().lower(): c for c in df.columns}
+            symbol_col = None
+            for candidate in ("ticker", "symbol"):
+                if candidate in cols:
+                    symbol_col = cols[candidate]
+                    break
+            if symbol_col is None:
+                continue
+            symbols = (
+                df[symbol_col]
+                .astype(str)
+                .str.strip()
+                .str.replace(".", "-", regex=False)
+                .tolist()
+            )
+            symbols = [s for s in symbols if s and s.lower() != "nan"]
+            if symbols:
+                return symbols
+        return []
+
+    for url in (wiki_url, fallback_url):
+        try:
+            resp = requests.get(url, headers=headers, timeout=20)
+            resp.raise_for_status()
+            tables = pd.read_html(StringIO(resp.text))
+            symbols = _extract_symbols(tables)
+            if symbols:
+                return symbols
+        except Exception as e:
+            logger.warning("Nasdaq-100 source failed (%s): %s", url, e)
+
+    raise RuntimeError("Unable to fetch Nasdaq-100 ticker list from available sources")
+
+
+def fetch_universe_tickers(universe: str) -> list[str]:
+    u = (universe or "").strip().lower()
+    if u in {"s&p 500", "sp500", "s and p 500"}:
+        return fetch_sp500_tickers()
+    if u in {"nasdaq 100", "nasdaq-100", "ndx"}:
+        return fetch_nasdaq100_tickers()
+    raise ValueError(f"Unsupported universe: {universe}")
 
 
 def refresh_fundamentals_yfinance(tickers: list[str], include_metadata: bool = False) -> RefreshResult:

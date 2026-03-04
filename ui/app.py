@@ -31,13 +31,12 @@ from data_pipeline.cache_manager import (
 )
 from data_pipeline.data_fetcher import (
     SCHEMA_COLUMNS,
-    fetch_sp500_tickers,
+    fetch_universe_tickers,
     fetch_ticker_details,
     refresh_fundamentals_yfinance,
 )
 
-CACHE_PATH = "data/fundamentals_cache.parquet"
-HEALTH_REPORT_PATH = "data/fundamentals_health_report.json"
+UNIVERSE_OPTIONS = ["S&P 500", "Nasdaq 100"]
 MAX_AGE_DAYS = 7
 MIN_REFRESH_SUCCESS_RATIO = 0.25
 FILTER_DEFAULTS = {
@@ -56,6 +55,19 @@ FILTER_DEFAULTS = {
     "ascending": False,
     "query": "",
 }
+
+
+def _universe_key(universe: str) -> str:
+    return (universe or "").strip().lower().replace("&", "and").replace(" ", "").replace("-", "")
+
+
+def _paths_for_universe(universe: str) -> tuple[str, str]:
+    key = _universe_key(universe)
+    if key in {"sandp500", "sp500"}:
+        return "data/fundamentals_cache_sp500.parquet", "data/fundamentals_health_report_sp500.json"
+    if key in {"nasdaq100", "ndx"}:
+        return "data/fundamentals_cache_nasdaq100.parquet", "data/fundamentals_health_report_nasdaq100.json"
+    raise ValueError(f"Unsupported universe: {universe}")
 
 
 @dataclass(frozen=True)
@@ -122,8 +134,8 @@ def _is_write_eligible(df: pd.DataFrame, requested_count: int, success_count: in
     return True, "cache updated"
 
 
-def update_cache(path: str, include_metadata: bool) -> UpdateCacheResult:
-    tickers = fetch_sp500_tickers()
+def update_cache(path: str, include_metadata: bool, universe: str, health_report_path: str) -> UpdateCacheResult:
+    tickers = fetch_universe_tickers(universe)
     refresh = refresh_fundamentals_yfinance(tickers, include_metadata=include_metadata)
     df = _ensure_derived_metrics(_ensure_schema(refresh.data))
     eligible, reason = _is_write_eligible(df, refresh.requested_count, refresh.success_count)
@@ -137,7 +149,7 @@ def update_cache(path: str, include_metadata: bool) -> UpdateCacheResult:
     try:
         report = {
             "run_timestamp": pd.Timestamp.utcnow().isoformat(),
-            "universe": "S&P 500",
+            "universe": universe,
             "requested_count": int(refresh.requested_count),
             "success_count": int(refresh.success_count),
             "failure_count": int(refresh.failure_count),
@@ -146,7 +158,7 @@ def update_cache(path: str, include_metadata: bool) -> UpdateCacheResult:
             "reason": str(reason),
             "errors_sample": list(refresh.errors_sample or []),
         }
-        write_json_report(report, HEALTH_REPORT_PATH)
+        write_json_report(report, health_report_path)
     except Exception:
         # Never allow reporting failures to break the UI.
         pass
@@ -228,14 +240,14 @@ def safe_str(x) -> str:
     return "" if x is None or (isinstance(x, float) and pd.isna(x)) else str(x)
 
 
-status = get_cache_status(CACHE_PATH, MAX_AGE_DAYS, required_columns=SCHEMA_COLUMNS)
-
 left, mid, right = st.columns([2, 2, 2], vertical_alignment="center")
 with left:
     st.markdown("## Stock Screener")
 with mid:
-    st.selectbox("Universe", ["S and P 500"], index=0)
+    universe = st.selectbox("Universe", UNIVERSE_OPTIONS, index=0)
 with right:
+    cache_path, health_report_path = _paths_for_universe(universe)
+    status = get_cache_status(cache_path, MAX_AGE_DAYS, required_columns=SCHEMA_COLUMNS)
     cache_text = "No cache" if not status.exists else f"Cache age: {status.age_days:.2f} days"
     fresh_text = "Fresh" if status.is_fresh else "Stale"
     schema_text = "Schema OK" if status.schema_ok else "Schema mismatch"
@@ -249,7 +261,7 @@ df_raw = None
 telemetry = None
 banner_warning = None
 
-stale_cache_df, _stale_cache_error = _read_cache_safe(CACHE_PATH) if (status.exists and status.schema_ok) else (None, None)
+stale_cache_df, _stale_cache_error = _read_cache_safe(cache_path) if (status.exists and status.schema_ok) else (None, None)
 if stale_cache_df is not None:
     stale_cache_df = _ensure_derived_metrics(_ensure_schema(stale_cache_df))
 
@@ -258,7 +270,12 @@ needs_refresh = force_refresh or (not status.exists) or (not status.is_fresh) or
 if needs_refresh:
     with st.spinner("Refreshing data (API calls happening now)..."):
         try:
-            update = update_cache(CACHE_PATH, include_metadata=enrich_metadata)
+            update = update_cache(
+                cache_path,
+                include_metadata=enrich_metadata,
+                universe=universe,
+                health_report_path=health_report_path,
+            )
             telemetry = (
                 f"Updated {update.success_count}/{update.requested_count} tickers | "
                 f"Rate-limited: {'yes' if update.rate_limited else 'no'}"
@@ -286,7 +303,7 @@ if needs_refresh:
                 st.stop()
 else:
     df_raw = stale_cache_df
-    telemetry = "Using fresh cache (no API refresh)"
+    telemetry = f"Using fresh cache (no API refresh) | Universe: {universe}"
 
 if telemetry:
     st.caption(telemetry)

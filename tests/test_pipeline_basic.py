@@ -48,7 +48,7 @@ def test_pipeline_writes_cache_and_report(tmp_path, monkeypatch):
             df[col] = None
     df = df[rp.SCHEMA_COLUMNS]
 
-    monkeypatch.setattr(rp, "fetch_sp500_tickers", lambda: ["AAPL"])
+    monkeypatch.setattr(rp, "fetch_universe_tickers", lambda universe: ["AAPL"])
     monkeypatch.setattr(rp, "refresh_fundamentals_yfinance", lambda tickers: DummyRefreshResult(df, 1, 1, 0, False, []))
 
     result = run_stock_fundamentals_pipeline(
@@ -71,7 +71,7 @@ def test_pipeline_handles_empty_refresh_without_crashing(tmp_path, monkeypatch):
     import data_pipeline.run_pipeline as rp
 
     empty_df = pd.DataFrame(columns=rp.SCHEMA_COLUMNS)
-    monkeypatch.setattr(rp, "fetch_sp500_tickers", lambda: ["ZZZZ"])
+    monkeypatch.setattr(rp, "fetch_universe_tickers", lambda universe: ["ZZZZ"])
     monkeypatch.setattr(
         rp,
         "refresh_fundamentals_yfinance",

@@ -14,7 +14,7 @@ from data_pipeline.cache_manager import (
     validate_schema_columns,
     write_json_report,
 )
-from data_pipeline.data_fetcher import SCHEMA_COLUMNS, fetch_sp500_tickers, refresh_fundamentals_yfinance
+from data_pipeline.data_fetcher import SCHEMA_COLUMNS, fetch_universe_tickers, refresh_fundamentals_yfinance
 from data_pipeline.data_health_report import summarize_refresh_outcome
 
 
@@ -51,7 +51,7 @@ def run_stock_fundamentals_pipeline(
             )
 
     if tickers is None:
-        tickers = fetch_sp500_tickers()
+        tickers = fetch_universe_tickers(universe)
 
     refresh = refresh_fundamentals_yfinance(tickers)
 
