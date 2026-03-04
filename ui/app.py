@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
+import sys
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -15,6 +17,11 @@ try:
     AGGRID_AVAILABLE = True
 except Exception:
     AGGRID_AVAILABLE = False
+
+# Ensure repo root is importable even when Streamlit starts from a nested cwd.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from data_pipeline.cache_manager import (
     get_cache_status,
