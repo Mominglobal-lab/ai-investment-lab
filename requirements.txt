@@ -1,0 +1,10 @@
+# requirements.txt
+streamlit
+pandas
+pyarrow
+yfinance
+lxml
+html5lib
+plotly>=5.18.0
+requests
+streamlit-aggrid
