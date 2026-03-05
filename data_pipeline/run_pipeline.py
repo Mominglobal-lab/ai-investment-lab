@@ -17,8 +17,10 @@ from data_pipeline.cache_manager import (
 from data_pipeline.data_fetcher import SCHEMA_COLUMNS, fetch_universe_tickers, refresh_fundamentals_yfinance
 from data_pipeline.data_fetcher import (
     FI_SCHEMA_COLUMNS,
+    PRICE_SCHEMA_COLUMNS,
     fetch_fixed_income_universe_instruments,
     refresh_fixed_income_yfinance,
+    refresh_prices_yfinance,
 )
 from data_pipeline.data_health_report import summarize_refresh_outcome
 
@@ -39,6 +41,18 @@ class FixedIncomePipelineRunResult:
     cache_path: str
     health_report_path: str
     reason: str
+
+
+@dataclass(frozen=True)
+class PricesPipelineRunResult:
+    data: pd.DataFrame
+    wrote_cache: bool
+    cache_path: str
+    health_report_path: str
+    reason: str
+    requested_count: int
+    success_count: int
+    failure_count: int
 
 
 def run_stock_fundamentals_pipeline(
@@ -220,3 +234,153 @@ def run_fixed_income_pipeline(
         health_report_path=health_report_path,
         reason=reason,
     )
+
+
+def _load_tickers_from_fundamentals_paths(paths: list[str]) -> list[str]:
+    tickers: set[str] = set()
+    for path in paths:
+        if not os.path.exists(path):
+            continue
+        df, _err = read_parquet_safe(path)
+        if df is None or df.empty or "Ticker" not in df.columns:
+            continue
+        vals = df["Ticker"].astype(str).str.upper().str.strip()
+        tickers.update([t for t in vals.tolist() if t and t.lower() != "nan"])
+    return sorted(tickers)
+
+
+def run_prices_cache_pipeline(
+    *,
+    prices_cache_path: str = "data/prices_cache.parquet",
+    health_report_path: str = "data/prices_health_report.json",
+    fundamentals_cache_paths: Optional[list[str]] = None,
+    benchmark_ticker: str = "SPY",
+    always_include_benchmarks: Optional[list[str]] = None,
+    max_age_days: float = 7.0,
+    lookback_years: int = 5,
+    min_refresh_success_ratio: float = 0.25,
+) -> PricesPipelineRunResult:
+    if fundamentals_cache_paths is None:
+        fundamentals_cache_paths = [
+            "data/fundamentals_cache.parquet",
+            "data/fundamentals_cache_sp500.parquet",
+            "data/fundamentals_cache_nasdaq100.parquet",
+        ]
+
+    status = get_cache_status(prices_cache_path, max_age_days, required_columns=PRICE_SCHEMA_COLUMNS)
+    if status.exists and status.schema_ok and status.is_fresh:
+        cached_df, _err = read_parquet_safe(prices_cache_path)
+        if cached_df is not None:
+            return PricesPipelineRunResult(
+                data=cached_df,
+                wrote_cache=False,
+                cache_path=prices_cache_path,
+                health_report_path=health_report_path,
+                reason="used fresh cache",
+                requested_count=0,
+                success_count=0,
+                failure_count=0,
+            )
+
+    tickers = _load_tickers_from_fundamentals_paths(fundamentals_cache_paths)
+    if always_include_benchmarks is None:
+        always_include_benchmarks = ["SPY", "QQQ", "IWM", "DIA"]
+    fixed_benchmarks = [str(t).strip().upper() for t in always_include_benchmarks if str(t).strip()]
+    if fixed_benchmarks:
+        tickers = sorted(set(tickers + fixed_benchmarks))
+
+    bench = str(benchmark_ticker or "").strip().upper()
+    if bench:
+        tickers = sorted(set(tickers + [bench]))
+    if not tickers:
+        raise ValueError("No tickers found in fundamentals cache; run fundamentals refresh first")
+
+    refresh = refresh_prices_yfinance(tickers=tickers, lookback_years=lookback_years)
+    df = refresh.data.copy()
+    for col in PRICE_SCHEMA_COLUMNS:
+        if col not in df.columns:
+            df[col] = None
+    df = df[PRICE_SCHEMA_COLUMNS]
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df["AdjClose"] = pd.to_numeric(df["AdjClose"], errors="coerce")
+    df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
+    df["Volume"] = pd.to_numeric(df["Volume"], errors="coerce")
+    df = df.dropna(subset=["Ticker", "Date", "AdjClose"]).sort_values(["Ticker", "Date"]).reset_index(drop=True)
+
+    schema_ok, missing_cols = validate_schema_columns(df, PRICE_SCHEMA_COLUMNS)
+    wrote_cache = False
+    reason = "cache updated"
+    if not schema_ok:
+        reason = f"missing required columns: {', '.join(missing_cols)}"
+    elif df.empty:
+        reason = "no rows returned from refresh"
+    elif refresh.requested_count > 0 and (refresh.success_count / refresh.requested_count) < min_refresh_success_ratio:
+        reason = f"success ratio {(refresh.success_count / refresh.requested_count):.1%} below threshold {min_refresh_success_ratio:.0%}"
+    else:
+        ensure_parent_dir(prices_cache_path)
+        save_parquet_atomic(df, prices_cache_path)
+        wrote_cache = True
+
+    date_start = df["Date"].min()
+    date_end = df["Date"].max()
+    report = {
+        "run_timestamp": pd.Timestamp.utcnow().isoformat(),
+        "tickers_requested": int(refresh.requested_count),
+        "tickers_successfully_fetched": int(refresh.success_count),
+        "tickers_failed": int(refresh.failure_count),
+        "period_start": date_start.isoformat() if pd.notna(date_start) else None,
+        "period_end": date_end.isoformat() if pd.notna(date_end) else None,
+        "cache_timestamp": pd.Timestamp.utcnow().isoformat(),
+        "wrote_cache": bool(wrote_cache),
+        "reason": str(reason),
+        "errors_sample": list(refresh.errors_sample or []),
+    }
+    write_json_report(report, health_report_path)
+
+    if not wrote_cache and status.exists:
+        stale_df, _err = read_parquet_safe(prices_cache_path)
+        if stale_df is not None and not stale_df.empty:
+            return PricesPipelineRunResult(
+                data=stale_df,
+                wrote_cache=False,
+                cache_path=prices_cache_path,
+                health_report_path=health_report_path,
+                reason=f"refresh not eligible: {reason}. used stale cache",
+                requested_count=refresh.requested_count,
+                success_count=refresh.success_count,
+                failure_count=refresh.failure_count,
+            )
+
+    return PricesPipelineRunResult(
+        data=df,
+        wrote_cache=wrote_cache,
+        cache_path=prices_cache_path,
+        health_report_path=health_report_path,
+        reason=reason,
+        requested_count=refresh.requested_count,
+        success_count=refresh.success_count,
+        failure_count=refresh.failure_count,
+    )
+
+
+def run_pipeline(
+    *,
+    build_prices_cache: bool = False,
+    max_age_days: float = 7.0,
+    stock_universe: str = "S&P 500",
+    fi_universe: str = "US Treasuries",
+    benchmark_ticker: str = "SPY",
+) -> dict[str, object]:
+    stock_result = run_stock_fundamentals_pipeline(max_age_days=max_age_days, universe=stock_universe)
+    fi_result = run_fixed_income_pipeline(max_age_days=max_age_days, universe=fi_universe)
+    prices_result = None
+    if build_prices_cache:
+        prices_result = run_prices_cache_pipeline(
+            max_age_days=max_age_days,
+            benchmark_ticker=benchmark_ticker,
+        )
+    return {
+        "stock": stock_result,
+        "fixed_income": fi_result,
+        "prices": prices_result,
+    }

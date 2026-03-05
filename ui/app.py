@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import sys
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -19,7 +20,9 @@ from data_pipeline.data_fetcher import (
     fetch_universe_tickers,
     refresh_fundamentals_yfinance,
 )
-from data_pipeline.run_pipeline import run_fixed_income_pipeline
+from data_pipeline.run_pipeline import run_fixed_income_pipeline, run_pipeline, run_prices_cache_pipeline
+from reports.decision_brief import generate_decision_brief
+from simulation.portfolio_simulator import simulate_portfolio
 
 st.set_page_config(page_title="Investment Lab", layout="wide")
 
@@ -27,6 +30,9 @@ STOCK_UNIVERSE_OPTIONS = ["S&P 500", "Nasdaq 100"]
 FI_UNIVERSE_OPTIONS = ["US Treasuries", "Bond ETFs"]
 MAX_AGE_DAYS = 7
 MIN_REFRESH_SUCCESS_RATIO = 0.25
+PRICE_SCHEMA_COLUMNS = ["Ticker", "Date", "AdjClose", "Close", "Volume"]
+PRICES_CACHE_PATH = "data/prices_cache.parquet"
+PRICES_HEALTH_PATH = "data/prices_health_report.json"
 
 
 def _apply_premium_theme() -> None:
@@ -122,6 +128,14 @@ def _apply_premium_theme() -> None:
             box-shadow: var(--shadow);
             backdrop-filter: blur(6px);
             min-height: 92px;
+        }
+
+        [data-testid="stHorizontalBlock"] > div:has([data-testid="stButton"]) {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding-top: 8px;
+            padding-bottom: 8px;
         }
 
         [data-testid="stExpander"] {
@@ -302,6 +316,31 @@ def _apply_premium_theme() -> None:
             font-weight: 500 !important;
             background: transparent !important;
         }
+
+        .ii-insights {
+            background: linear-gradient(180deg, rgba(12, 27, 50, 0.96), rgba(12, 27, 50, 0.90));
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 10px 14px;
+            margin-bottom: 0.5rem;
+        }
+
+        .ii-insights h4 {
+            margin: 0 0 6px 0;
+            color: #e8f1ff;
+            font-size: 1.05rem;
+        }
+
+        .ii-insights ul {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        .ii-insights li {
+            margin: 1px 0;
+            line-height: 1.2;
+            color: #dce9ff;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -339,6 +378,82 @@ def _fi_paths(universe: str) -> tuple[str, str]:
     if key in {"bondetfs", "bondetf", "etf"}:
         return "data/fixed_income_cache_bond_etf.parquet", "data/fixed_income_health_bond_etf.json"
     raise ValueError(f"Unsupported fixed-income universe: {universe}")
+
+
+def _load_fundamentals_union() -> pd.DataFrame:
+    paths = [
+        "data/fundamentals_cache.parquet",
+        "data/fundamentals_cache_sp500.parquet",
+        "data/fundamentals_cache_nasdaq100.parquet",
+    ]
+    frames: list[pd.DataFrame] = []
+    for p in paths:
+        df, _err = read_parquet_safe(p)
+        if df is None or df.empty:
+            continue
+        if "Ticker" not in df.columns:
+            continue
+        keep_cols = [c for c in ["Ticker", "MarketCap"] if c in df.columns]
+        frames.append(df[keep_cols].copy())
+    if not frames:
+        return pd.DataFrame(columns=["Ticker", "MarketCap"])
+    out = pd.concat(frames, axis=0, ignore_index=True)
+    out["Ticker"] = out["Ticker"].astype(str).str.upper().str.strip()
+    out["MarketCap"] = pd.to_numeric(out.get("MarketCap"), errors="coerce")
+    out = out.dropna(subset=["Ticker"]).drop_duplicates(subset=["Ticker"], keep="last")
+    return out
+
+
+def _parse_ticker_input(text: str) -> list[str]:
+    raw = [x.strip().upper() for x in str(text or "").split(",")]
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in raw:
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        out.append(t)
+    return out
+
+
+def _build_holdings(
+    tickers: list[str],
+    weighting_mode: str,
+    fundamentals_df: pd.DataFrame,
+    manual_weights_text: str,
+) -> tuple[list[tuple[str, float]], list[str]]:
+    warnings: list[str] = []
+    if not tickers:
+        return [], ["No tickers provided"]
+
+    if weighting_mode == "Equal weight":
+        w = 1.0 / len(tickers)
+        return [(t, w) for t in tickers], warnings
+
+    if weighting_mode == "Market cap weight":
+        if fundamentals_df.empty:
+            w = 1.0 / len(tickers)
+            warnings.append("Fundamentals cache unavailable for market-cap weighting. Using equal weights.")
+            return [(t, w) for t in tickers], warnings
+        mcap_map = fundamentals_df.set_index("Ticker")["MarketCap"].to_dict()
+        vals = [float(mcap_map.get(t, 0.0) or 0.0) for t in tickers]
+        total = float(sum([v for v in vals if v > 0]))
+        if total <= 0:
+            w = 1.0 / len(tickers)
+            warnings.append("Selected tickers missing market-cap values. Using equal weights.")
+            return [(t, w) for t in tickers], warnings
+        return [(t, float(max(v, 0.0) / total)) for t, v in zip(tickers, vals)], warnings
+
+    tokens = [x.strip() for x in str(manual_weights_text or "").split(",") if x.strip()]
+    if len(tokens) != len(tickers):
+        return [], [f"Manual weights count ({len(tokens)}) must match ticker count ({len(tickers)})"]
+    weights: list[float] = []
+    for tok in tokens:
+        try:
+            weights.append(float(tok))
+        except Exception:
+            return [], [f"Invalid manual weight: {tok}"]
+    return list(zip(tickers, weights)), warnings
 
 
 def _ensure_stock_schema(df: pd.DataFrame) -> pd.DataFrame:
@@ -795,8 +910,297 @@ def _show_fixed_income_tab() -> None:
         st.caption(telemetry_text)
 
 
-stock_tab, fi_tab = st.tabs(["Stock Screener", "Bond & Treasury Screener"])
+def _show_portfolio_simulator_tab() -> None:
+    title_col, act1, act2, act3 = st.columns([3.2, 1.0, 1.0, 1.0], vertical_alignment="center")
+    with title_col:
+        st.markdown("## Portfolio Decision Simulator")
+    with act1:
+        refresh_clicked = st.button("Refresh Data", key="sim_refresh_data_btn", use_container_width=True)
+    with act2:
+        run_clicked = st.button("Run Simulation", key="sim_run_btn", use_container_width=True)
+    with act3:
+        export_clicked = st.button("Export Decision Brief", key="sim_export_brief", use_container_width=True)
+
+    price_status = get_cache_status(PRICES_CACHE_PATH, MAX_AGE_DAYS, required_columns=PRICE_SCHEMA_COLUMNS)
+    if (not price_status.exists) or (not price_status.schema_ok):
+        st.warning("Price cache not found. Please run pipeline refresh.")
+        if refresh_clicked:
+            with st.spinner("Refreshing pipeline and rebuilding prices cache..."):
+                try:
+                    run_pipeline(
+                        build_prices_cache=True,
+                        max_age_days=MAX_AGE_DAYS,
+                        benchmark_ticker=str(st.session_state.get("sim_benchmark", "SPY") or "SPY").strip().upper(),
+                    )
+                    st.success("Prices cache refresh completed.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Refresh failed: {e}")
+        return
+
+    fundamentals = _load_fundamentals_union()
+    default_tickers = "AAPL, MSFT, NVDA, GOOGL"
+
+    r1c1, r1c2, r1c3 = st.columns([2.4, 1.2, 1.2], vertical_alignment="bottom")
+    with r1c1:
+        ticker_text = st.text_input("Tickers (comma-separated)", value=default_tickers, key="sim_tickers")
+    with r1c2:
+        weighting_mode = st.selectbox(
+            "Weighting",
+            ["Equal weight", "Market cap weight", "Manual weights"],
+            index=0,
+            key="sim_weighting_mode",
+        )
+    with r1c3:
+        benchmark = st.text_input("Benchmark", value="SPY", key="sim_benchmark").strip().upper()
+
+    manual_weights_text = ""
+    if weighting_mode == "Manual weights":
+        manual_weights_text = st.text_input(
+            "Manual weights (comma-separated, same order as tickers)",
+            value="0.25, 0.25, 0.25, 0.25",
+            key="sim_manual_weights",
+        )
+
+    if refresh_clicked:
+        with st.spinner("Refreshing prices cache..."):
+            try:
+                refresh_result = run_prices_cache_pipeline(
+                    prices_cache_path=PRICES_CACHE_PATH,
+                    health_report_path=PRICES_HEALTH_PATH,
+                    benchmark_ticker=benchmark or "SPY",
+                    max_age_days=0.0,
+                )
+                st.success(
+                    "Prices cache refreshed. "
+                    f"Requested: {refresh_result.requested_count}, "
+                    f"Success: {refresh_result.success_count}, "
+                    f"Failed: {refresh_result.failure_count}."
+                )
+                st.rerun()
+            except Exception as e:
+                st.error(f"Refresh failed: {e}")
+
+    r2c1, r2c2, r2c3, r2c4, r2c5 = st.columns(5, vertical_alignment="bottom")
+    with r2c1:
+        lookback_years = st.selectbox("Lookback period", [1, 3, 5, 10], index=2, key="sim_lookback")
+    with r2c2:
+        rebalance_label = st.selectbox("Rebalance", ["None", "Monthly"], index=0, key="sim_rebalance")
+    with r2c3:
+        mode_label = st.selectbox("Simulation mode", ["Historical", "Monte Carlo"], index=0, key="sim_mode")
+    with r2c4:
+        initial_capital = float(
+            st.number_input(
+                "Starting capital ($)",
+                min_value=100.0,
+                max_value=100000000.0,
+                value=10000.0,
+                step=1000.0,
+                key="sim_initial_capital",
+            )
+        )
+    with r2c5:
+        strict_mode = st.checkbox("Strict missing-data mode", value=False, key="sim_strict")
+
+    mc_paths = 1000
+    horizon_days = 252
+    if mode_label == "Monte Carlo":
+        m1, m2 = st.columns(2, vertical_alignment="bottom")
+        with m1:
+            mc_paths = int(st.number_input("Number of simulations", min_value=100, max_value=20000, value=1000, step=100, key="sim_mc_paths"))
+        with m2:
+            horizon_years = float(st.number_input("Horizon years", min_value=0.5, max_value=10.0, value=1.0, step=0.5, key="sim_horizon_years"))
+            horizon_days = int(round(horizon_years * 252))
+
+    tickers = _parse_ticker_input(ticker_text)
+    holdings, build_warnings = _build_holdings(
+        tickers=tickers,
+        weighting_mode=weighting_mode,
+        fundamentals_df=fundamentals,
+        manual_weights_text=manual_weights_text,
+    )
+    for w in build_warnings:
+        st.warning(w)
+
+    if run_clicked:
+        if not holdings:
+            st.error("Cannot run simulation: invalid holdings setup.")
+        else:
+            try:
+                result = simulate_portfolio(
+                    holdings=holdings,
+                    lookback_years=int(lookback_years),
+                    rebalance_rule="monthly" if rebalance_label == "Monthly" else "none",
+                    benchmark=benchmark or "SPY",
+                    mode="monte_carlo" if mode_label == "Monte Carlo" else "historical",
+                    monte_carlo_paths=int(mc_paths),
+                    horizon_days=int(horizon_days),
+                    strict=bool(strict_mode),
+                    initial_capital=float(initial_capital),
+                )
+                result.setdefault("portfolio", {})
+                result["portfolio"]["weighting_mode"] = weighting_mode
+                st.session_state["portfolio_sim_result"] = result
+            except Exception as e:
+                st.error(f"Simulation failed: {e}")
+
+    result = st.session_state.get("portfolio_sim_result")
+    if not result:
+        st.caption("Configure inputs and click Run Simulation.")
+        return
+
+    if export_clicked:
+        try:
+            artifact = generate_decision_brief(
+                simulation_result=result,
+                output_dir="data/run_artifacts",
+                format="html",
+                title="Portfolio Decision Brief",
+            )
+            st.success(
+                "Decision Brief exported. "
+                f"HTML: {artifact.get('html_path')} | JSON: {artifact.get('json_path')}"
+            )
+        except Exception as e:
+            st.error(f"Decision Brief export failed: {e}")
+
+    ts = result.get("timeseries", {})
+    dates = pd.to_datetime(ts.get("dates", []), errors="coerce")
+    pvals = pd.Series(ts.get("portfolio_value", []), index=dates, name="Portfolio")
+    dds = pd.Series(ts.get("drawdown", []), index=dates, name="Drawdown")
+    bvals_raw = ts.get("benchmark_value")
+    bvals = pd.Series(bvals_raw, index=dates, name="Benchmark") if bvals_raw is not None else None
+
+    insights = result.get("decision_insights", [])
+    if not insights:
+        st.caption("No insights available.")
+    else:
+        insight_items = "".join(f"<li>{line}</li>" for line in insights)
+        st.markdown(
+            f'<div class="ii-insights"><h4>Decision Insights</h4><ul>{insight_items}</ul></div>',
+            unsafe_allow_html=True,
+        )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        end_portfolio = float(pvals.dropna().iloc[-1]) if not pvals.dropna().empty else 0.0
+        start_capital = float((result.get("metadata") or {}).get("initial_capital", 10000.0))
+        if bvals is not None and not bvals.dropna().empty:
+            end_benchmark = float(bvals.dropna().iloc[-1])
+            growth_title = (
+                f"#### Growth of \\${start_capital:,.0f} "
+                f"(Portfolio \\${end_portfolio:,.0f} vs. Benchmark \\${end_benchmark:,.0f})"
+            )
+        else:
+            growth_title = (
+                f"#### Growth of \\${start_capital:,.0f} "
+                f"(Portfolio \\${end_portfolio:,.0f} vs. Benchmark N/A)"
+            )
+        st.markdown(growth_title)
+        growth_df = pd.DataFrame({"Date": pd.to_datetime(pvals.index, errors="coerce"), "Portfolio": pvals.values}).dropna()
+        if bvals is not None:
+            btmp = pd.DataFrame({"Date": pd.to_datetime(bvals.index, errors="coerce"), "Benchmark": bvals.values}).dropna()
+            growth_df = growth_df.merge(btmp, on="Date", how="left")
+        growth_long = growth_df.melt(id_vars=["Date"], var_name="Series", value_name="Value").dropna()
+        if not growth_long.empty:
+            growth_chart = (
+                alt.Chart(growth_long)
+                .mark_line()
+                .encode(
+                    x=alt.X("Date:T", title=""),
+                    y=alt.Y("Value:Q", title=""),
+                    color=alt.Color("Series:N", legend=alt.Legend(title="")),
+                )
+                .properties(height=320)
+                .interactive()
+            )
+            st.altair_chart(growth_chart, use_container_width=True)
+        else:
+            st.caption("No growth data available.")
+    with c2:
+        st.markdown("#### Drawdown")
+        draw_df = pd.DataFrame(
+            {
+                "Date": pd.to_datetime(dds.index, errors="coerce"),
+                "DrawdownPct": (dds * 100.0).round(0),
+            }
+        ).dropna()
+        if not draw_df.empty:
+            y_min = float(draw_df["DrawdownPct"].min())
+            draw_chart = (
+                alt.Chart(draw_df)
+                .mark_line()
+                .encode(
+                    x=alt.X("Date:T", title=""),
+                    y=alt.Y(
+                        "DrawdownPct:Q",
+                        title="",
+                        scale=alt.Scale(domain=[y_min, 0]),
+                        axis=alt.Axis(format=".0f", labelExpr="datum.value + '%'"),
+                    ),
+                )
+                .properties(height=320)
+                .interactive()
+            )
+            st.altair_chart(draw_chart, use_container_width=True)
+        else:
+            st.caption("No drawdown data available.")
+
+    st.markdown("#### Performance Metrics")
+    summary = result.get("summary", {}) or {}
+    pct_metrics = {
+        "CAGR",
+        "volatility",
+        "max_drawdown",
+        "worst_day",
+        "worst_month",
+        "VaR_95",
+        "CVaR_95",
+    }
+    rows = []
+    for metric, raw in summary.items():
+        if isinstance(raw, (int, float)):
+            if metric in pct_metrics:
+                val = f"{float(raw) * 100:.2f}%"
+            else:
+                val = f"{float(raw):.4f}"
+        else:
+            val = raw
+        rows.append({"Metric": metric, "Value": val})
+    summary_df = pd.DataFrame(rows, columns=["Metric", "Value"])
+    summary_styler = (
+        summary_df.style.hide(axis="index").set_table_styles(
+            [
+                {"selector": "th.col0, td.col0", "props": [("text-align", "left")]},
+                {"selector": "th.col1, td.col1", "props": [("text-align", "center")]},
+            ]
+        )
+    )
+    st.markdown(f'<div class="ii-table-wrap">{summary_styler.to_html()}</div>', unsafe_allow_html=True)
+
+    scenario = result.get("scenario_results")
+    if scenario:
+        st.markdown("#### Monte Carlo Scenario Summary")
+        end_pct = scenario.get("ending_value_percentiles", {})
+        dd_pct = scenario.get("max_drawdown_percentiles", {})
+        mc_df = pd.DataFrame(
+            [
+                {"Statistic": "Ending Value p05", "Value": end_pct.get("p05")},
+                {"Statistic": "Ending Value p50", "Value": end_pct.get("p50")},
+                {"Statistic": "Ending Value p95", "Value": end_pct.get("p95")},
+                {"Statistic": "Max Drawdown p05", "Value": dd_pct.get("p05")},
+                {"Statistic": "Max Drawdown p50", "Value": dd_pct.get("p50")},
+                {"Statistic": "Max Drawdown p95", "Value": dd_pct.get("p95")},
+                {"Statistic": "Probability of Loss", "Value": scenario.get("probability_of_loss")},
+            ]
+        )
+        st.dataframe(mc_df, use_container_width=True, hide_index=True)
+
+
+stock_tab, fi_tab, sim_tab = st.tabs(["Stock Screener", "Bond & Treasury Screener", "Portfolio Decision Simulator"])
 with stock_tab:
     _show_stock_tab()
 with fi_tab:
     _show_fixed_income_tab()
+with sim_tab:
+    _show_portfolio_simulator_tab()

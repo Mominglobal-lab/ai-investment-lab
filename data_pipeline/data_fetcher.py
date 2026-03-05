@@ -69,6 +69,15 @@ class FixedIncomeRefreshResult:
     errors_sample: list[str]
 
 
+@dataclass(frozen=True)
+class PriceRefreshResult:
+    data: pd.DataFrame
+    requested_count: int
+    success_count: int
+    failure_count: int
+    errors_sample: list[str]
+
+
 FI_SCHEMA_COLUMNS = [
     "Symbol",
     "Name",
@@ -89,6 +98,16 @@ FI_NUMERIC_COLUMNS = [
     "Expense_Ratio_Pct",
     "AUM",
 ]
+
+PRICE_SCHEMA_COLUMNS = [
+    "Ticker",
+    "Date",
+    "AdjClose",
+    "Close",
+    "Volume",
+]
+
+PRICE_NUMERIC_COLUMNS = ["AdjClose", "Close", "Volume"]
 
 TREASURY_ETF_INSTRUMENTS = [
     {"Symbol": "BIL", "Name": "SPDR Bloomberg 1-3 Month T-Bill ETF", "Duration_Years": 0.10, "Maturity_Bucket": "0-1Y"},
@@ -117,6 +136,10 @@ def _empty_schema_df() -> pd.DataFrame:
 
 def _empty_fixed_income_df() -> pd.DataFrame:
     return pd.DataFrame(columns=FI_SCHEMA_COLUMNS)
+
+
+def _empty_prices_df() -> pd.DataFrame:
+    return pd.DataFrame(columns=PRICE_SCHEMA_COLUMNS)
 
 
 def _chunks(items: list[str], size: int) -> list[list[str]]:
@@ -640,3 +663,69 @@ def fetch_ticker_details(ticker: str) -> dict:
         "ROE_Pct": (info.get("returnOnEquity") * 100.0) if info.get("returnOnEquity") is not None else None,
         "Rule_of_40": rule_of_40,
     }
+
+
+def refresh_prices_yfinance(tickers: list[str], lookback_years: int = 5) -> PriceRefreshResult:
+    import yfinance as yf
+
+    clean_tickers = sorted(set([str(t).strip().upper() for t in tickers if str(t).strip()]))
+    requested = len(clean_tickers)
+    if requested == 0:
+        return PriceRefreshResult(
+            data=_empty_prices_df(),
+            requested_count=0,
+            success_count=0,
+            failure_count=0,
+            errors_sample=[],
+        )
+
+    period_years = max(int(lookback_years), 5)
+    rows: list[dict[str, object]] = []
+    errors_sample: list[str] = []
+    success_count = 0
+
+    for ticker in clean_tickers:
+        try:
+            hist = yf.Ticker(ticker).history(period=f"{period_years}y", interval="1d", auto_adjust=False)
+            if hist is None or hist.empty:
+                raise ValueError("empty history")
+            frame = hist.reset_index()
+            date_col = "Date" if "Date" in frame.columns else frame.columns[0]
+            frame["Date"] = pd.to_datetime(frame[date_col], errors="coerce").dt.tz_localize(None)
+            frame["AdjClose"] = pd.to_numeric(frame.get("Adj Close"), errors="coerce")
+            frame["Close"] = pd.to_numeric(frame.get("Close"), errors="coerce")
+            frame["Volume"] = pd.to_numeric(frame.get("Volume"), errors="coerce")
+            frame = frame.dropna(subset=["Date", "AdjClose"])
+            if frame.empty:
+                raise ValueError("no valid AdjClose rows")
+            rows.extend(
+                {
+                    "Ticker": ticker,
+                    "Date": r["Date"],
+                    "AdjClose": r["AdjClose"],
+                    "Close": r["Close"],
+                    "Volume": r["Volume"],
+                }
+                for _, r in frame.iterrows()
+            )
+            success_count += 1
+        except Exception as e:
+            if len(errors_sample) < MAX_ERROR_SAMPLES:
+                errors_sample.append(f"{ticker}: {e}")
+
+    out = pd.DataFrame(rows, columns=PRICE_SCHEMA_COLUMNS)
+    if not out.empty:
+        out["Ticker"] = out["Ticker"].astype(str).str.upper().str.strip()
+        out["Date"] = pd.to_datetime(out["Date"], errors="coerce")
+        for col in PRICE_NUMERIC_COLUMNS:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+        out = out.dropna(subset=["Ticker", "Date", "AdjClose"]).sort_values(["Ticker", "Date"]).reset_index(drop=True)
+
+    failure_count = max(requested - success_count, 0)
+    return PriceRefreshResult(
+        data=out,
+        requested_count=requested,
+        success_count=success_count,
+        failure_count=failure_count,
+        errors_sample=errors_sample,
+    )
