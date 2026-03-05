@@ -265,6 +265,19 @@ def _apply_premium_theme() -> None:
             color: #7f8fa8 !important;
         }
 
+        [data-testid="stJson"] {
+            border: 1px solid #b8c6dc;
+            border-radius: 12px;
+            background: #ffffff !important;
+            padding: 0.35rem 0.5rem;
+        }
+
+        [data-testid="stJson"] *,
+        [data-testid="stJson"] span,
+        [data-testid="stJson"] div {
+            color: #0a0f18 !important;
+        }
+
         [data-testid="stTabs"] [data-baseweb="tab-list"] {
             gap: 10px;
             margin-bottom: 0.15rem;
@@ -1368,7 +1381,7 @@ def _show_decision_intelligence_tab() -> None:
             st.bar_chart(dist.set_index("Bucket"))
         st.markdown("#### Top Quality Entities")
         top_q = quality_df.sort_values("QualityScore", ascending=False).head(30)
-        st.dataframe(top_q, use_container_width=True, hide_index=True)
+        _render_styled_table(top_q)
 
     if regime_df is not None and not regime_df.empty and {"Date", "RegimeLabel", "ConfidenceScore"}.issubset(set(regime_df.columns)):
         st.markdown("#### Regime Timeline")
@@ -1408,7 +1421,7 @@ def _show_decision_intelligence_tab() -> None:
         )
         st.altair_chart(risk_chart, use_container_width=True)
         st.markdown("#### Recent Risk Signals")
-        st.dataframe(ktmp.tail(30), use_container_width=True, hide_index=True)
+        _render_styled_table(ktmp.tail(30))
 
     st.markdown("#### Model Registry")
     try:
@@ -1416,7 +1429,31 @@ def _show_decision_intelligence_tab() -> None:
 
         with open("data/model_registry.json", "r", encoding="utf-8") as f:
             registry = json.load(f)
-        st.json(registry)
+        generated_at = registry.get("generated_at")
+        if generated_at:
+            st.caption(f"Generated at: {generated_at}")
+
+        models = registry.get("models", [])
+        if isinstance(models, list) and models:
+            model_df = pd.json_normalize(models, sep=".")
+            preferred_cols = [
+                "model_name",
+                "model_version",
+                "timestamp",
+                "training_or_evaluation_window",
+                "evaluation_summary.rows_scored",
+                "evaluation_summary.quality_score_mean",
+                "evaluation_summary.quality_score_median",
+                "evaluation_summary.risk_score_mean",
+                "evaluation_summary.regime_latest",
+                "evaluation_summary.risk_level_latest",
+            ]
+            show_cols = [c for c in preferred_cols if c in model_df.columns]
+            if not show_cols:
+                show_cols = list(model_df.columns)
+            _render_styled_table(model_df[show_cols])
+        else:
+            st.caption("No model entries found in model registry.")
     except Exception:
         st.caption("`data/model_registry.json` not available.")
 
@@ -1426,7 +1463,42 @@ def _show_decision_intelligence_tab() -> None:
 
         with open("data/model_health_report.json", "r", encoding="utf-8") as f:
             health = json.load(f)
-        st.json(health)
+        generated_at = health.get("generated_at")
+        if generated_at:
+            st.caption(f"Generated at: {generated_at}")
+
+        freshness = health.get("model_freshness", {})
+        if isinstance(freshness, dict) and freshness:
+            fresh_df = pd.DataFrame(
+                [{"artifact": k, "status": str(v)} for k, v in freshness.items()]
+            )
+            status_l = fresh_df["status"].str.lower()
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("Fresh", int((status_l == "fresh").sum()))
+            with c2:
+                st.metric("Stale", int((status_l == "stale").sum()))
+            with c3:
+                st.metric("Other", int((~status_l.isin(["fresh", "stale"])).sum()))
+            _render_styled_table(fresh_df)
+
+        coverage = health.get("input_cache_coverage", {})
+        if isinstance(coverage, dict) and coverage:
+            cov_rows: list[dict] = []
+            for cache_name, payload in coverage.items():
+                row = {"cache": cache_name}
+                if isinstance(payload, dict):
+                    row.update(payload)
+                else:
+                    row["value"] = payload
+                cov_rows.append(row)
+            cov_df = pd.DataFrame(cov_rows)
+            if not cov_df.empty:
+                preferred_cov_cols = ["cache", "exists", "schema_ok", "row_count", "status", "value"]
+                cov_cols = [c for c in preferred_cov_cols if c in cov_df.columns]
+                if not cov_cols:
+                    cov_cols = list(cov_df.columns)
+                _render_styled_table(cov_df[cov_cols])
     except Exception:
         st.caption("`data/model_health_report.json` not available.")
 
@@ -1451,7 +1523,7 @@ def _show_explainability_tab() -> None:
         if qbase is None or qbase.empty:
             st.caption("No quality score data available.")
         else:
-            st.dataframe(qbase.head(50), use_container_width=True, hide_index=True)
+            _render_styled_table(qbase.head(50))
     else:
         qexp = qexp.copy()
         qexp["Ticker"] = qexp["Ticker"].astype(str).str.upper().str.strip()
@@ -1478,7 +1550,7 @@ def _show_explainability_tab() -> None:
         if not cdf.empty:
             cdf["AbsContribution"] = cdf["SignedContribution"].abs()
             cdf = cdf.sort_values("AbsContribution", ascending=False).drop(columns=["AbsContribution"])
-            st.dataframe(cdf, use_container_width=True, hide_index=True)
+            _render_styled_table(cdf)
             top_feats = cdf["Feature"].head(3).tolist()
             if not fdf.empty:
                 raw_vals = []
@@ -1489,7 +1561,7 @@ def _show_explainability_tab() -> None:
                         val = fm.loc[t].get(base_feat) if base_feat in fm.columns else None
                         raw_vals.append({"Feature": feat, "RawValue": val})
                     st.markdown("#### Evidence Card")
-                    st.dataframe(pd.DataFrame(raw_vals), use_container_width=True, hide_index=True)
+                    _render_styled_table(pd.DataFrame(raw_vals))
 
     # Section B: Regime Evidence
     st.markdown("### B. Operating Environment Evidence")
@@ -1520,7 +1592,7 @@ def _show_explainability_tab() -> None:
             evmap = {}
         if evmap:
             edt = pd.DataFrame([{"Indicator": k, "Value": v} for k, v in evmap.items()])
-            st.dataframe(edt, use_container_width=True, hide_index=True)
+            _render_styled_table(edt)
 
     # Section C: Systemic Risk Evidence
     st.markdown("### C. Systemic Risk Evidence")
@@ -1554,7 +1626,7 @@ def _show_explainability_tab() -> None:
             evmap = {}
         if evmap:
             edt = pd.DataFrame([{"Indicator": k2, "Value": v2} for k2, v2 in evmap.items()])
-            st.dataframe(edt, use_container_width=True, hide_index=True)
+            _render_styled_table(edt)
 
         ktail = k.tail(int(lookback_days)).copy()
         if "RiskScore" in ktail.columns:
@@ -1652,7 +1724,7 @@ def _show_uncertainty_tab() -> None:
                     {"Regime": "Risk Off", "Probability": float(row["P_RiskOff"])},
                 ]
             )
-            st.dataframe(prob_df, use_container_width=True, hide_index=True)
+            _render_styled_table(prob_df)
             st.bar_chart(prob_df.set_index("Regime"))
             if "RegimeStability_20d" in row:
                 st.caption(f"RegimeStability_20d: {float(row['RegimeStability_20d']):.2f}")
@@ -1748,7 +1820,7 @@ def _show_monitoring_tab() -> None:
         if recent.empty:
             recent = a.sort_values("Date", ascending=False).head(30)
         cols = [c for c in ["Severity", "AlertType", "Title", "Date"] if c in recent.columns]
-        st.dataframe(recent[cols], use_container_width=True, hide_index=True)
+        _render_styled_table(recent[cols])
 
         choices = [f"{r.Severity} | {r.AlertType} | {r.Date:%Y-%m-%d}" for r in recent.itertuples()]
         idx = st.selectbox("Select alert", options=list(range(len(choices))), format_func=lambda i: choices[i], key="mon_alert_pick")
@@ -1756,7 +1828,13 @@ def _show_monitoring_tab() -> None:
         st.caption(str(row.get("Description", "")))
         try:
             ev = json.loads(str(row.get("EvidenceJSON", "{}")))
-            st.json(ev)
+            if isinstance(ev, dict) and ev:
+                ev_df = pd.json_normalize(ev, sep=".")
+                _render_styled_table(ev_df)
+            elif isinstance(ev, list) and ev:
+                _render_styled_table(pd.json_normalize(ev, sep="."))
+            else:
+                st.caption("No structured evidence details available.")
         except Exception:
             st.caption("Evidence JSON unavailable.")
         st.caption(f"Suggested action: {row.get('SuggestedAction', 'N/A')}")
@@ -1776,7 +1854,7 @@ def _show_monitoring_tab() -> None:
     if type_pick != "All":
         d = d[d["MetricType"] == type_pick]
     d = d.sort_values("DriftScore", ascending=False)
-    st.dataframe(d, use_container_width=True, hide_index=True)
+    _render_styled_table(d)
 
     if not drift_df.empty:
         metric_names = sorted(drift_df["MetricName"].astype(str).unique().tolist())
@@ -1820,13 +1898,136 @@ def _show_monitoring_tab() -> None:
     try:
         with open(DRIFT_REPORT_PATH, "r", encoding="utf-8") as f:
             dr = json.load(f)
-        st.json(dr)
+        st.markdown("**Drift Report**")
+        if isinstance(dr, dict) and dr:
+            created_at = dr.get("created_at") or dr.get("generated_at")
+            if created_at:
+                st.caption(f"Generated at: {created_at}")
+
+            top_features = dr.get("top_drifting_features", [])
+            top_signals = dr.get("top_drifting_signals", [])
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("Top Feature Drivers", len(top_features) if isinstance(top_features, list) else 0)
+            with c2:
+                st.metric("Top Signal Drivers", len(top_signals) if isinstance(top_signals, list) else 0)
+            with c3:
+                worst_level = "Unknown"
+                if isinstance(top_features, list) and top_features:
+                    levels = pd.Series([str(x.get("DriftLevel", "")) for x in top_features]).str.lower()
+                    if (levels == "severe").any():
+                        worst_level = "Severe"
+                    elif (levels == "drift").any():
+                        worst_level = "Drift"
+                    elif (levels == "stable").any():
+                        worst_level = "Stable"
+                st.metric("Worst Feature Drift", worst_level)
+
+            window_settings = dr.get("window_settings_used", {})
+            if isinstance(window_settings, dict) and window_settings:
+                st.markdown("Window Settings")
+                _render_styled_table(pd.DataFrame([window_settings]))
+
+            if isinstance(top_features, list) and top_features:
+                st.markdown("Top Drifting Features")
+                _render_styled_table(pd.DataFrame(top_features))
+            if isinstance(top_signals, list) and top_signals:
+                st.markdown("Top Drifting Signals")
+                _render_styled_table(pd.DataFrame(top_signals))
+
+            coverage = dr.get("data_coverage_stats", {})
+            if isinstance(coverage, dict) and coverage:
+                st.markdown("Coverage Summary")
+                cov_simple = {
+                    k: v for k, v in coverage.items() if k != "missing_counts"
+                }
+                if cov_simple:
+                    _render_styled_table(pd.DataFrame([cov_simple]))
+                missing_counts = coverage.get("missing_counts", {})
+                if isinstance(missing_counts, dict) and missing_counts:
+                    miss_df = pd.DataFrame(
+                        [{"MetricName": k, "MissingCount": int(v)} for k, v in missing_counts.items()]
+                    ).sort_values("MissingCount", ascending=False)
+                    st.markdown("Missing Feature Counts")
+                    _render_styled_table(miss_df)
+
+            notes = dr.get("warnings_and_fallbacks_used", [])
+            if isinstance(notes, list) and notes:
+                st.markdown("Warnings and Fallbacks")
+                for n in notes:
+                    st.caption(f"- {n}")
+
+            summary = dr.get("short_narrative_summary")
+            if summary:
+                st.caption(str(summary))
+        elif isinstance(dr, list) and dr:
+            _render_styled_table(pd.json_normalize(dr, sep="."))
+        else:
+            st.caption("Drift report is empty.")
     except Exception:
         st.caption("drift_report.json not available.")
     try:
         with open(MONITORING_HEALTH_PATH, "r", encoding="utf-8") as f:
             mh = json.load(f)
-        st.json(mh)
+        st.markdown("**Monitoring Health Report**")
+        if isinstance(mh, dict) and mh:
+            created_at = mh.get("created_at") or mh.get("generated_at")
+            if created_at:
+                st.caption(f"Generated at: {created_at}")
+
+            freshness = mh.get("artifact_freshness", {})
+            status_l = pd.Series(dtype=str)
+            if isinstance(freshness, dict) and freshness:
+                status_l = pd.Series([str(v) for v in freshness.values()]).str.lower()
+
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("Alerts Generated", int(mh.get("alerts_generated_count") or 0))
+            with c2:
+                st.metric("Worst Drift Level", str(mh.get("worst_drift_level", "Unknown")))
+            with c3:
+                st.metric("Fresh Artifacts", int((status_l == "fresh").sum()) if not status_l.empty else 0)
+
+            if isinstance(freshness, dict) and freshness:
+                fresh_df = pd.DataFrame(
+                    [{"artifact": k, "status": str(v)} for k, v in freshness.items()]
+                )
+                st.markdown("Artifact Freshness")
+                _render_styled_table(fresh_df)
+
+            coverage = mh.get("coverage", {})
+            if isinstance(coverage, dict) and coverage:
+                st.markdown("Coverage Summary")
+                cov_simple = {
+                    k: v for k, v in coverage.items() if k != "missing_counts"
+                }
+                if cov_simple:
+                    _render_styled_table(pd.DataFrame([cov_simple]))
+                missing_counts = coverage.get("missing_counts", {})
+                if isinstance(missing_counts, dict) and missing_counts:
+                    miss_df = pd.DataFrame(
+                        [{"MetricName": k, "MissingCount": int(v)} for k, v in missing_counts.items()]
+                    ).sort_values("MissingCount", ascending=False)
+                    st.markdown("Coverage Missing Counts")
+                    _render_styled_table(miss_df)
+
+            mfc = mh.get("missing_feature_counts", {})
+            if isinstance(mfc, dict) and mfc:
+                mfc_df = pd.DataFrame(
+                    [{"MetricName": k, "MissingCount": int(v)} for k, v in mfc.items()]
+                ).sort_values("MissingCount", ascending=False)
+                st.markdown("Missing Feature Counts")
+                _render_styled_table(mfc_df)
+
+            notes = mh.get("runtime_notes", [])
+            if isinstance(notes, list) and notes:
+                st.markdown("Runtime Notes")
+                for n in notes:
+                    st.caption(f"- {n}")
+        elif isinstance(mh, list) and mh:
+            _render_styled_table(pd.json_normalize(mh, sep="."))
+        else:
+            st.caption("Monitoring health report is empty.")
     except Exception:
         st.caption("monitoring_health_report.json not available.")
 
