@@ -20,7 +20,15 @@ from data_pipeline.data_fetcher import (
     fetch_universe_tickers,
     refresh_fundamentals_yfinance,
 )
-from data_pipeline.run_pipeline import run_fixed_income_pipeline, run_pipeline, run_prices_cache_pipeline
+from data_pipeline.run_pipeline import (
+    run_decision_models_pipeline,
+    run_explainability_pipeline,
+    run_fixed_income_pipeline,
+    run_monitoring_pipeline,
+    run_pipeline,
+    run_prices_cache_pipeline,
+    run_uncertainty_pipeline,
+)
 from reports.decision_brief import generate_decision_brief
 from simulation.portfolio_simulator import simulate_portfolio
 
@@ -257,7 +265,17 @@ def _apply_premium_theme() -> None:
         }
 
         [data-testid="stDataFrame"] td {
-            border-top: 1px solid #e2e8f2 !important;
+            border-top: 1px solid #ccd8e8 !important;
+            border-bottom: 1px solid #ccd8e8 !important;
+        }
+
+        [data-testid="stDataFrame"] [role="columnheader"] {
+            border-bottom: 1px solid #b7c8dc !important;
+        }
+
+        [data-testid="stDataFrame"] [role="gridcell"] {
+            border-bottom: 1px solid #c2d1e4 !important;
+            box-shadow: inset 0 -1px 0 #c2d1e4;
         }
 
         [data-testid="stDataFrame"] td:has(span[title="None"]),
@@ -327,14 +345,27 @@ def _apply_premium_theme() -> None:
             background: #ffffff;
         }
 
-        .ii-table-wrap table {
+        .ii-table-wrap table,
+        .ii-table-wrap table.dataframe {
             width: 100%;
+            border-collapse: collapse !important;
         }
 
         .ii-table-wrap thead th {
             color: #05070b !important;
             font-weight: 900 !important;
             background: #edf3fb !important;
+            border-bottom: 1px solid #b7c8dc !important;
+        }
+
+        .ii-table-wrap tbody tr td,
+        .ii-table-wrap table.dataframe tbody tr td {
+            border-bottom: 1px solid #c2d1e4 !important;
+        }
+
+        .ii-table-wrap tbody tr:last-child td,
+        .ii-table-wrap table.dataframe tbody tr:last-child td {
+            border-bottom: 1px solid #c2d1e4 !important;
         }
 
         .ii-table-wrap tbody td {
@@ -1341,7 +1372,22 @@ def _show_portfolio_simulator_tab() -> None:
 
 
 def _show_decision_intelligence_tab() -> None:
-    st.markdown("## Decision Intelligence")
+    title_col, action_col = st.columns([4.2, 1.2], vertical_alignment="center")
+    with title_col:
+        st.markdown("## Decision Intelligence")
+    with action_col:
+        build_models_clicked = st.button("Build Model Artifacts", key="di_build_models_btn", use_container_width=True)
+
+    if build_models_clicked:
+        with st.spinner("Building model artifacts..."):
+            try:
+                run_decision_models_pipeline(
+                    benchmark_ticker=str(st.session_state.get("sim_benchmark", "SPY") or "SPY").strip().upper(),
+                )
+                st.success("Model artifacts built successfully.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Model artifact build failed: {e}")
 
     quality_df, _qerr = read_parquet_safe(QUALITY_CACHE_PATH)
     regime_df, _rerr = read_parquet_safe(REGIME_CACHE_PATH)
@@ -1398,7 +1444,18 @@ def _show_decision_intelligence_tab() -> None:
                 y=alt.Y("RegimeCode:Q", title="Regime (-1 Off, 0 Neutral, 1 On)"),
                 color=alt.Color("RegimeLabel:N", legend=alt.Legend(title="")),
             )
-            .properties(height=260)
+            .properties(height=300, padding={"left": 8, "right": 12, "top": 8, "bottom": 34})
+            .configure_axis(
+                labelColor="#dce9ff",
+                titleColor="#dce9ff",
+                labelPadding=8,
+                titlePadding=10,
+                gridColor="#30445f",
+                tickColor="#496184",
+                domainColor="#496184",
+            )
+            .configure_legend(labelColor="#dce9ff", titleColor="#dce9ff")
+            .configure_view(strokeOpacity=0)
             .interactive()
         )
         st.altair_chart(chart, use_container_width=True)
@@ -1416,7 +1473,17 @@ def _show_decision_intelligence_tab() -> None:
                 x=alt.X("Date:T", title=""),
                 y=alt.Y("RiskScore:Q", title="Risk Score"),
             )
-            .properties(height=260)
+            .properties(height=300, padding={"left": 8, "right": 12, "top": 8, "bottom": 34})
+            .configure_axis(
+                labelColor="#dce9ff",
+                titleColor="#dce9ff",
+                labelPadding=8,
+                titlePadding=10,
+                gridColor="#30445f",
+                tickColor="#496184",
+                domainColor="#496184",
+            )
+            .configure_view(strokeOpacity=0)
             .interactive()
         )
         st.altair_chart(risk_chart, use_container_width=True)
@@ -1504,7 +1571,30 @@ def _show_decision_intelligence_tab() -> None:
 
 
 def _show_explainability_tab() -> None:
-    st.markdown("## Explainability and Evidence")
+    title_col, action_col = st.columns([4.2, 1.2], vertical_alignment="center")
+    with title_col:
+        st.markdown("## Explainability and Evidence")
+    with action_col:
+        build_explain_clicked = st.button(
+            "Build Explainability Artifacts",
+            key="xpl_build_artifacts_btn",
+            use_container_width=True,
+        )
+
+    if build_explain_clicked:
+        benchmark = str(st.session_state.get("sim_benchmark", "SPY") or "SPY").strip().upper()
+        with st.spinner("Building explainability artifacts..."):
+            try:
+                q_base, _ = read_parquet_safe(QUALITY_CACHE_PATH)
+                r_base, _ = read_parquet_safe(REGIME_CACHE_PATH)
+                k_base, _ = read_parquet_safe(RISK_CACHE_PATH)
+                if q_base is None or r_base is None or k_base is None:
+                    run_decision_models_pipeline(benchmark_ticker=benchmark)
+                run_explainability_pipeline(benchmark_ticker=benchmark)
+                st.success("Explainability artifacts built successfully.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Explainability artifact build failed: {e}")
 
     import json
 
@@ -1648,7 +1738,30 @@ def _show_explainability_tab() -> None:
 
 
 def _show_uncertainty_tab() -> None:
-    st.markdown("## Uncertainty and Confidence")
+    title_col, action_col = st.columns([4.2, 1.2], vertical_alignment="center")
+    with title_col:
+        st.markdown("## Uncertainty and Confidence")
+    with action_col:
+        build_uncertainty_clicked = st.button(
+            "Build Uncertainty Artifacts",
+            key="unc_build_artifacts_btn",
+            use_container_width=True,
+        )
+
+    if build_uncertainty_clicked:
+        benchmark = str(st.session_state.get("sim_benchmark", "SPY") or "SPY").strip().upper()
+        with st.spinner("Building uncertainty artifacts..."):
+            try:
+                q_base, _ = read_parquet_safe(QUALITY_CACHE_PATH)
+                r_base, _ = read_parquet_safe(REGIME_CACHE_PATH)
+                k_base, _ = read_parquet_safe(RISK_CACHE_PATH)
+                if q_base is None or r_base is None or k_base is None:
+                    run_decision_models_pipeline(benchmark_ticker=benchmark)
+                run_uncertainty_pipeline(benchmark_ticker=benchmark)
+                st.success("Uncertainty artifacts built successfully.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Uncertainty artifact build failed: {e}")
 
     qu, _qe = read_parquet_safe(QUALITY_UNCERTAINTY_PATH)
     rp, _re = read_parquet_safe(REGIME_PROB_PATH)
@@ -1775,7 +1888,29 @@ def _show_uncertainty_tab() -> None:
 
 
 def _show_monitoring_tab() -> None:
-    st.markdown("## Drift, Monitoring, and Early Warning")
+    title_col, action_col = st.columns([4.2, 1.2], vertical_alignment="center")
+    with title_col:
+        st.markdown("## Drift, Monitoring, and Early Warning")
+    with action_col:
+        build_monitoring_clicked = st.button(
+            "Build Monitoring Artifacts",
+            key="mon_build_artifacts_btn",
+            use_container_width=True,
+        )
+
+    if build_monitoring_clicked:
+        benchmark = str(st.session_state.get("sim_benchmark", "SPY") or "SPY").strip().upper()
+        with st.spinner("Building monitoring artifacts..."):
+            try:
+                r_base, _ = read_parquet_safe(REGIME_CACHE_PATH)
+                k_base, _ = read_parquet_safe(RISK_CACHE_PATH)
+                if r_base is None or k_base is None:
+                    run_decision_models_pipeline(benchmark_ticker=benchmark)
+                run_monitoring_pipeline(benchmark_ticker=benchmark)
+                st.success("Monitoring artifacts built successfully.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Monitoring artifact build failed: {e}")
 
     import json
 
