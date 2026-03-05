@@ -271,11 +271,18 @@ def _apply_premium_theme() -> None:
 
         [data-testid="stDataFrame"] [role="columnheader"] {
             border-bottom: 1px solid #b7c8dc !important;
+            border-right: 1px solid #c2d1e4 !important;
         }
 
         [data-testid="stDataFrame"] [role="gridcell"] {
             border-bottom: 1px solid #c2d1e4 !important;
+            border-right: 1px solid #c2d1e4 !important;
             box-shadow: inset 0 -1px 0 #c2d1e4;
+        }
+
+        [data-testid="stDataFrame"] [role="columnheader"]:last-child,
+        [data-testid="stDataFrame"] [role="gridcell"]:last-child {
+            border-right: none !important;
         }
 
         [data-testid="stDataFrame"] td:has(span[title="None"]),
@@ -552,54 +559,15 @@ def _ensure_stock_schema(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _styled_table(df: pd.DataFrame):
+def _render_styled_table(df: pd.DataFrame) -> None:
     show = df.copy()
     numeric_cols = show.select_dtypes(include=["number"]).columns.tolist()
-    fmt = {c: "{:,.2f}" for c in numeric_cols}
-
-    styler = show.style.format(fmt, na_rep="-").set_table_styles(
-        [
-            {
-                "selector": "th",
-                "props": [
-                    ("background-color", "#f0f4fa"),
-                    ("color", "#0a0f18"),
-                    ("font-weight", "900"),
-                    ("border-bottom", "1px solid #d5e0ee"),
-                    ("border-right", "1px solid #d5e0ee"),
-                    ("padding", "10px 8px"),
-                ],
-            },
-            {
-                "selector": "td",
-                "props": [
-                    ("color", "#04070d"),
-                    ("font-weight", "500"),
-                    ("border-color", "#d9e4f2"),
-                    ("padding", "8px"),
-                ],
-            },
-            {
-                "selector": "table",
-                "props": [
-                    ("border-collapse", "collapse"),
-                    ("border", "1px solid #c4d4e8"),
-                    ("font-size", "14px"),
-                ],
-            },
-        ]
-    )
-    styler = styler.set_properties(**{"color": "#04070d", "font-weight": "500"})
-    styler = styler.apply(
-        lambda row: ["background-color: #f4f8ff" if (row.name % 2 == 1) else "background-color: #ffffff" for _ in row],
-        axis=1,
-    )
-    return styler
-
-
-def _render_styled_table(df: pd.DataFrame) -> None:
-    styler = _styled_table(df).hide(axis="index")
-    st.markdown(f'<div class="ii-table-wrap">{styler.to_html()}</div>', unsafe_allow_html=True)
+    if numeric_cols:
+        show[numeric_cols] = show[numeric_cols].round(2)
+    try:
+        st.dataframe(show, use_container_width=True, hide_index=True)
+    except TypeError:
+        st.dataframe(show, use_container_width=True)
 
 
 def _update_stock_cache(cache_path: str, health_report_path: str, universe: str, include_metadata: bool) -> StockUpdateResult:
@@ -1335,15 +1303,7 @@ def _show_portfolio_simulator_tab() -> None:
             val = raw
         rows.append({"Metric": metric, "Value": val})
     summary_df = pd.DataFrame(rows, columns=["Metric", "Value"])
-    summary_styler = (
-        summary_df.style.hide(axis="index").set_table_styles(
-            [
-                {"selector": "th.col0, td.col0", "props": [("text-align", "left")]},
-                {"selector": "th.col1, td.col1", "props": [("text-align", "center")]},
-            ]
-        )
-    )
-    st.markdown(f'<div class="ii-table-wrap">{summary_styler.to_html()}</div>', unsafe_allow_html=True)
+    _render_styled_table(summary_df)
 
     scenario = result.get("scenario_results")
     if scenario:
@@ -1360,15 +1320,7 @@ def _show_portfolio_simulator_tab() -> None:
             {"Statistic": "Probability of Loss (chance portfolio ends below starting capital)", "Value": f"{float(scenario.get('probability_of_loss') or 0.0) * 100:.2f}%"},
         ]
         mc_df = pd.DataFrame(mc_rows, columns=["Statistic", "Value"])
-        mc_styler = (
-            mc_df.style.hide(axis="index").set_table_styles(
-                [
-                    {"selector": "th.col0, td.col0", "props": [("text-align", "left")]},
-                    {"selector": "th.col1, td.col1", "props": [("text-align", "center")]},
-                ]
-            )
-        )
-        st.markdown(f'<div class="ii-table-wrap">{mc_styler.to_html()}</div>', unsafe_allow_html=True)
+        _render_styled_table(mc_df)
 
 
 def _show_decision_intelligence_tab() -> None:
