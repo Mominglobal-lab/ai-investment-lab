@@ -33,6 +33,12 @@ MIN_REFRESH_SUCCESS_RATIO = 0.25
 PRICE_SCHEMA_COLUMNS = ["Ticker", "Date", "AdjClose", "Close", "Volume"]
 PRICES_CACHE_PATH = "data/prices_cache.parquet"
 PRICES_HEALTH_PATH = "data/prices_health_report.json"
+QUALITY_CACHE_PATH = "data/quality_scores_cache.parquet"
+REGIME_CACHE_PATH = "data/regime_cache.parquet"
+RISK_CACHE_PATH = "data/risk_signals_cache.parquet"
+QUALITY_EXPLAIN_PATH = "data/quality_explanations_cache.parquet"
+REGIME_EVIDENCE_PATH = "data/regime_evidence_cache.parquet"
+RISK_EVIDENCE_PATH = "data/risk_evidence_cache.parquet"
 
 
 def _apply_premium_theme() -> None:
@@ -456,6 +462,30 @@ def _build_holdings(
     return list(zip(tickers, weights)), warnings
 
 
+def _load_latest_model_signals() -> tuple[str, str]:
+    regime_label = "Unknown"
+    risk_level = "Unknown"
+
+    regime_df, _err = read_parquet_safe(REGIME_CACHE_PATH)
+    if regime_df is not None and not regime_df.empty and "RegimeLabel" in regime_df.columns:
+        regime_label = str(regime_df.iloc[-1]["RegimeLabel"])
+
+    risk_df, _err = read_parquet_safe(RISK_CACHE_PATH)
+    if risk_df is not None and not risk_df.empty and "RiskLevel" in risk_df.columns:
+        risk_level = str(risk_df.iloc[-1]["RiskLevel"])
+
+    return regime_label, risk_level
+
+
+def _show_signal_banner() -> None:
+    regime_label, risk_level = _load_latest_model_signals()
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"**Market Regime:** {regime_label}")
+    with c2:
+        st.markdown(f"**Systemic Risk:** {risk_level}")
+
+
 def _ensure_stock_schema(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     for col in SCHEMA_COLUMNS:
@@ -623,6 +653,18 @@ def _show_stock_tab() -> None:
         return
 
     df = df_raw.copy()
+    qdf, _qerr = read_parquet_safe(QUALITY_CACHE_PATH)
+    if qdf is not None and not qdf.empty and "Ticker" in qdf.columns:
+        qtmp = qdf.copy()
+        qtmp["Ticker"] = qtmp["Ticker"].astype(str).str.upper().str.strip()
+        if "QualityScore" in qtmp.columns:
+            qtmp["QualityScore"] = pd.to_numeric(qtmp["QualityScore"], errors="coerce")
+        df["Ticker"] = df["Ticker"].astype(str).str.upper().str.strip()
+        df = df.merge(qtmp[["Ticker", "QualityScore", "QualityTier"]], on="Ticker", how="left")
+    else:
+        df["QualityScore"] = pd.NA
+        df["QualityTier"] = pd.NA
+
     f1, f2, f3, f4 = st.columns([2.0, 2.0, 1.6, 1.6], vertical_alignment="bottom")
     with f1:
         query = st.text_input("Search ticker/company", value="", key="stock_query").strip().lower()
@@ -652,6 +694,8 @@ def _show_stock_tab() -> None:
             "stock_mcap_min_b": 0.0,
             "stock_mcap_max_b": 10000.0,
             "stock_require_complete": False,
+            "stock_quality_min": 0.0,
+            "stock_sort_by": "MarketCap",
         }
         for k, v in defaults.items():
             st.session_state[k] = v
@@ -702,6 +746,23 @@ def _show_stock_tab() -> None:
             )
 
         require_complete = st.checkbox("Require complete data", value=False, key="stock_require_complete")
+        q1, q2 = st.columns(2)
+        with q1:
+            quality_min = st.slider(
+                "Quality score min",
+                min_value=0.0,
+                max_value=100.0,
+                value=0.0,
+                step=1.0,
+                key="stock_quality_min",
+            )
+        with q2:
+            sort_by = st.selectbox(
+                "Sort by",
+                ["MarketCap", "QualityScore"],
+                index=0,
+                key="stock_sort_by",
+            )
 
     if query:
         df = df[
@@ -739,6 +800,9 @@ def _show_stock_tab() -> None:
     if mcap_max_b < 10000:
         mask = df["MarketCap"] <= (mcap_max_b * 1e9)
         df = df[mask | df["MarketCap"].isna()] if allow_missing else df[mask]
+    if quality_min > 0:
+        mask = pd.to_numeric(df["QualityScore"], errors="coerce") >= quality_min
+        df = df[mask | df["QualityScore"].isna()] if allow_missing else df[mask]
 
     if require_complete:
         df = df.dropna(
@@ -753,7 +817,8 @@ def _show_stock_tab() -> None:
                 "MarketCap",
             ]
         )
-    df = df.sort_values(by="MarketCap", ascending=False)
+    sort_col = "QualityScore" if sort_by == "QualityScore" else "MarketCap"
+    df = df.sort_values(by=sort_col, ascending=False, na_position="last")
 
     df_show = df.copy()
     df_show["MarketCap (B)"] = (pd.to_numeric(df_show["MarketCap"], errors="coerce") / 1e9).round(2)
@@ -764,6 +829,8 @@ def _show_stock_tab() -> None:
             "Ticker",
             "Company",
             "Sector",
+            "QualityScore",
+            "QualityTier",
             "Close",
             "MarketCap (B)",
             "Revenue_Growth_YoY_Pct",
@@ -1071,6 +1138,19 @@ def _show_portfolio_simulator_tab() -> None:
     bvals_raw = ts.get("benchmark_value")
     bvals = pd.Series(bvals_raw, index=dates, name="Benchmark") if bvals_raw is not None else None
 
+    sim_start = pd.to_datetime((result.get("metadata") or {}).get("period_start"), errors="coerce")
+    regime_df, _rerr = read_parquet_safe(REGIME_CACHE_PATH)
+    if regime_df is not None and not regime_df.empty and {"Date", "RegimeLabel"}.issubset(set(regime_df.columns)) and pd.notna(sim_start):
+        rg = regime_df.copy()
+        rg["Date"] = pd.to_datetime(rg["Date"], errors="coerce")
+        rg = rg.dropna(subset=["Date"]).sort_values("Date")
+        at_start = rg[rg["Date"] <= sim_start]
+        if at_start.empty:
+            label = str(rg.iloc[0]["RegimeLabel"])
+        else:
+            label = str(at_start.iloc[-1]["RegimeLabel"])
+        st.caption(f"Regime at simulation start ({sim_start.strftime('%Y-%m-%d')}): {label}")
+
     insights = result.get("decision_insights", [])
     if not insights:
         st.caption("No insights available.")
@@ -1080,6 +1160,12 @@ def _show_portfolio_simulator_tab() -> None:
             f'<div class="ii-insights"><h4>Decision Insights</h4><ul>{insight_items}</ul></div>',
             unsafe_allow_html=True,
         )
+
+    show_risk_overlay = st.checkbox(
+        "Show Risk Overlay (adds a line showing calmer vs riskier periods)",
+        value=False,
+        key="sim_show_risk_overlay",
+    )
 
     c1, c2 = st.columns(2)
     with c1:
@@ -1102,8 +1188,23 @@ def _show_portfolio_simulator_tab() -> None:
             btmp = pd.DataFrame({"Date": pd.to_datetime(bvals.index, errors="coerce"), "Benchmark": bvals.values}).dropna()
             growth_df = growth_df.merge(btmp, on="Date", how="left")
         growth_long = growth_df.melt(id_vars=["Date"], var_name="Series", value_name="Value").dropna()
+        risk_overlay = None
+        if show_risk_overlay:
+            risk_df, _risk_err = read_parquet_safe(RISK_CACHE_PATH)
+            if risk_df is not None and not risk_df.empty and {"Date", "RiskScore"}.issubset(set(risk_df.columns)):
+                rtmp = risk_df.copy()
+                rtmp["Date"] = pd.to_datetime(rtmp["Date"], errors="coerce")
+                rtmp["RiskScore"] = pd.to_numeric(rtmp["RiskScore"], errors="coerce")
+                rtmp = rtmp.dropna(subset=["Date", "RiskScore"]).sort_values("Date")
+                if not rtmp.empty:
+                    risk_overlay = pd.merge_asof(
+                        growth_df[["Date"]].sort_values("Date"),
+                        rtmp[["Date", "RiskScore"]],
+                        on="Date",
+                        direction="backward",
+                    ).dropna()
         if not growth_long.empty:
-            growth_chart = (
+            growth_lines = (
                 alt.Chart(growth_long)
                 .mark_line()
                 .encode(
@@ -1111,9 +1212,24 @@ def _show_portfolio_simulator_tab() -> None:
                     y=alt.Y("Value:Q", title=""),
                     color=alt.Color("Series:N", legend=alt.Legend(title="")),
                 )
-                .properties(height=320)
-                .interactive()
             )
+            if risk_overlay is not None and not risk_overlay.empty:
+                risk_line = (
+                    alt.Chart(risk_overlay)
+                    .mark_line(color="#ff9f43", strokeDash=[4, 4])
+                    .encode(
+                        x=alt.X("Date:T", title=""),
+                        y=alt.Y(
+                            "RiskScore:Q",
+                            title="Risk Score",
+                            axis=alt.Axis(orient="right"),
+                            scale=alt.Scale(domain=[0, 100]),
+                        ),
+                    )
+                )
+                growth_chart = alt.layer(growth_lines, risk_line).resolve_scale(y="independent").properties(height=320).interactive()
+            else:
+                growth_chart = growth_lines.properties(height=320).interactive()
             st.altair_chart(growth_chart, use_container_width=True)
         else:
             st.caption("No growth data available.")
@@ -1183,24 +1299,287 @@ def _show_portfolio_simulator_tab() -> None:
         st.markdown("#### Monte Carlo Scenario Summary")
         end_pct = scenario.get("ending_value_percentiles", {})
         dd_pct = scenario.get("max_drawdown_percentiles", {})
-        mc_df = pd.DataFrame(
-            [
-                {"Statistic": "Ending Value p05", "Value": end_pct.get("p05")},
-                {"Statistic": "Ending Value p50", "Value": end_pct.get("p50")},
-                {"Statistic": "Ending Value p95", "Value": end_pct.get("p95")},
-                {"Statistic": "Max Drawdown p05", "Value": dd_pct.get("p05")},
-                {"Statistic": "Max Drawdown p50", "Value": dd_pct.get("p50")},
-                {"Statistic": "Max Drawdown p95", "Value": dd_pct.get("p95")},
-                {"Statistic": "Probability of Loss", "Value": scenario.get("probability_of_loss")},
-            ]
+        mc_rows = [
+            {"Statistic": "Ending Value p05 (very conservative outcome; only 5% of runs end lower)", "Value": f"${float(end_pct.get('p05') or 0.0):,.0f}"},
+            {"Statistic": "Ending Value p50 (middle outcome; typical expected ending value)", "Value": f"${float(end_pct.get('p50') or 0.0):,.0f}"},
+            {"Statistic": "Ending Value p95 (strong outcome; only 5% of runs end higher)", "Value": f"${float(end_pct.get('p95') or 0.0):,.0f}"},
+            {"Statistic": "Max Drawdown p05 (severe drop scenario in bad outcomes)", "Value": f"{float(dd_pct.get('p05') or 0.0) * 100:.2f}%"},
+            {"Statistic": "Max Drawdown p50 (typical deepest drop during the period)", "Value": f"{float(dd_pct.get('p50') or 0.0) * 100:.2f}%"},
+            {"Statistic": "Max Drawdown p95 (milder drop scenario in better outcomes)", "Value": f"{float(dd_pct.get('p95') or 0.0) * 100:.2f}%"},
+            {"Statistic": "Probability of Loss (chance portfolio ends below starting capital)", "Value": f"{float(scenario.get('probability_of_loss') or 0.0) * 100:.2f}%"},
+        ]
+        mc_df = pd.DataFrame(mc_rows, columns=["Statistic", "Value"])
+        mc_styler = (
+            mc_df.style.hide(axis="index").set_table_styles(
+                [
+                    {"selector": "th.col0, td.col0", "props": [("text-align", "left")]},
+                    {"selector": "th.col1, td.col1", "props": [("text-align", "center")]},
+                ]
+            )
         )
-        st.dataframe(mc_df, use_container_width=True, hide_index=True)
+        st.markdown(f'<div class="ii-table-wrap">{mc_styler.to_html()}</div>', unsafe_allow_html=True)
 
 
-stock_tab, fi_tab, sim_tab = st.tabs(["Stock Screener", "Bond & Treasury Screener", "Portfolio Decision Simulator"])
+def _show_decision_intelligence_tab() -> None:
+    st.markdown("## Decision Intelligence")
+
+    quality_df, _qerr = read_parquet_safe(QUALITY_CACHE_PATH)
+    regime_df, _rerr = read_parquet_safe(REGIME_CACHE_PATH)
+    risk_df, _risk_err = read_parquet_safe(RISK_CACHE_PATH)
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Quality Rows", int(len(quality_df)) if quality_df is not None else 0)
+    with c2:
+        latest_regime = "Unknown"
+        if regime_df is not None and not regime_df.empty and "RegimeLabel" in regime_df.columns:
+            latest_regime = str(regime_df.iloc[-1]["RegimeLabel"])
+        st.metric("Latest Regime", latest_regime)
+    with c3:
+        latest_risk = "Unknown"
+        if risk_df is not None and not risk_df.empty and "RiskLevel" in risk_df.columns:
+            latest_risk = str(risk_df.iloc[-1]["RiskLevel"])
+        st.metric("Latest Risk", latest_risk)
+
+    if quality_df is None and regime_df is None and risk_df is None:
+        st.warning("Model artifacts not found. Run pipeline with run_models=True.")
+        return
+
+    if quality_df is not None and not quality_df.empty:
+        st.markdown("#### Quality Score Distribution")
+        qtmp = quality_df.copy()
+        if "QualityScore" in qtmp.columns:
+            qtmp["QualityScore"] = pd.to_numeric(qtmp["QualityScore"], errors="coerce")
+            bins = pd.cut(
+                qtmp["QualityScore"],
+                bins=[0, 20, 40, 60, 80, 100],
+                labels=["0-20", "20-40", "40-60", "60-80", "80-100"],
+                include_lowest=True,
+            )
+            dist = bins.value_counts().sort_index().reset_index()
+            dist.columns = ["Bucket", "Count"]
+            st.bar_chart(dist.set_index("Bucket"))
+        st.markdown("#### Top Quality Entities")
+        top_q = quality_df.sort_values("QualityScore", ascending=False).head(30)
+        st.dataframe(top_q, use_container_width=True, hide_index=True)
+
+    if regime_df is not None and not regime_df.empty and {"Date", "RegimeLabel", "ConfidenceScore"}.issubset(set(regime_df.columns)):
+        st.markdown("#### Regime Timeline")
+        rtmp = regime_df.copy()
+        rtmp["Date"] = pd.to_datetime(rtmp["Date"], errors="coerce")
+        rtmp = rtmp.dropna(subset=["Date"]).sort_values("Date")
+        label_map = {"Risk Off": -1, "Neutral": 0, "Risk On": 1}
+        rtmp["RegimeCode"] = rtmp["RegimeLabel"].map(label_map).fillna(0)
+        chart = (
+            alt.Chart(rtmp.tail(500))
+            .mark_line()
+            .encode(
+                x=alt.X("Date:T", title=""),
+                y=alt.Y("RegimeCode:Q", title="Regime (-1 Off, 0 Neutral, 1 On)"),
+                color=alt.Color("RegimeLabel:N", legend=alt.Legend(title="")),
+            )
+            .properties(height=260)
+            .interactive()
+        )
+        st.altair_chart(chart, use_container_width=True)
+
+    if risk_df is not None and not risk_df.empty and {"Date", "RiskScore", "RiskLevel"}.issubset(set(risk_df.columns)):
+        st.markdown("#### Systemic Risk Timeline")
+        ktmp = risk_df.copy()
+        ktmp["Date"] = pd.to_datetime(ktmp["Date"], errors="coerce")
+        ktmp["RiskScore"] = pd.to_numeric(ktmp["RiskScore"], errors="coerce")
+        ktmp = ktmp.dropna(subset=["Date", "RiskScore"]).sort_values("Date")
+        risk_chart = (
+            alt.Chart(ktmp.tail(500))
+            .mark_line(color="#ff9f43")
+            .encode(
+                x=alt.X("Date:T", title=""),
+                y=alt.Y("RiskScore:Q", title="Risk Score"),
+            )
+            .properties(height=260)
+            .interactive()
+        )
+        st.altair_chart(risk_chart, use_container_width=True)
+        st.markdown("#### Recent Risk Signals")
+        st.dataframe(ktmp.tail(30), use_container_width=True, hide_index=True)
+
+    st.markdown("#### Model Registry")
+    try:
+        import json
+
+        with open("data/model_registry.json", "r", encoding="utf-8") as f:
+            registry = json.load(f)
+        st.json(registry)
+    except Exception:
+        st.caption("`data/model_registry.json` not available.")
+
+    st.markdown("#### Model Health")
+    try:
+        import json
+
+        with open("data/model_health_report.json", "r", encoding="utf-8") as f:
+            health = json.load(f)
+        st.json(health)
+    except Exception:
+        st.caption("`data/model_health_report.json` not available.")
+
+
+def _show_explainability_tab() -> None:
+    st.markdown("## Explainability and Evidence")
+
+    import json
+
+    qexp, _qe = read_parquet_safe(QUALITY_EXPLAIN_PATH)
+    qbase, _qb = read_parquet_safe(QUALITY_CACHE_PATH)
+    revid, _re = read_parquet_safe(REGIME_EVIDENCE_PATH)
+    revbase, _rb = read_parquet_safe(REGIME_CACHE_PATH)
+    kevid, _ke = read_parquet_safe(RISK_EVIDENCE_PATH)
+    kbase, _kb = read_parquet_safe(RISK_CACHE_PATH)
+    fdf = _load_fundamentals_union()
+
+    # Section A: Entity Explainability
+    st.markdown("### A. Entity Explainability")
+    if qexp is None or qexp.empty:
+        st.warning("Quality explanations cache missing. Showing fallback from quality scores cache when available.")
+        if qbase is None or qbase.empty:
+            st.caption("No quality score data available.")
+        else:
+            st.dataframe(qbase.head(50), use_container_width=True, hide_index=True)
+    else:
+        qexp = qexp.copy()
+        qexp["Ticker"] = qexp["Ticker"].astype(str).str.upper().str.strip()
+        tickers = sorted(qexp["Ticker"].dropna().unique().tolist())
+        t = st.selectbox("Ticker", options=tickers, index=0, key="xpl_ticker")
+        row = qexp[qexp["Ticker"] == t].head(1).iloc[0]
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("QualityScore", f"{float(row.get('QualityScore', 0.0)):.2f}")
+        with c2:
+            st.metric("QualityTier", str(row.get("QualityTier", "Unknown")))
+        with c3:
+            st.metric("FeatureAsOfDate", str(row.get("FeatureAsOfDate", "Unknown")))
+        st.caption(f"Top positive drivers: {row.get('TopPositiveDrivers', 'None')}")
+        st.caption(f"Top negative drivers: {row.get('TopNegativeDrivers', 'None')}")
+
+        contrib_map = {}
+        try:
+            contrib_map = json.loads(str(row.get("ContributionJSON", "{}")))
+        except Exception:
+            contrib_map = {}
+        cdf = pd.DataFrame([{"Feature": k, "SignedContribution": float(v)} for k, v in contrib_map.items()])
+        if not cdf.empty:
+            cdf["AbsContribution"] = cdf["SignedContribution"].abs()
+            cdf = cdf.sort_values("AbsContribution", ascending=False).drop(columns=["AbsContribution"])
+            st.dataframe(cdf, use_container_width=True, hide_index=True)
+            top_feats = cdf["Feature"].head(3).tolist()
+            if not fdf.empty:
+                raw_vals = []
+                fm = fdf.set_index("Ticker")
+                if t in fm.index:
+                    for feat in top_feats:
+                        base_feat = feat.replace("_stability", "")
+                        val = fm.loc[t].get(base_feat) if base_feat in fm.columns else None
+                        raw_vals.append({"Feature": feat, "RawValue": val})
+                    st.markdown("#### Evidence Card")
+                    st.dataframe(pd.DataFrame(raw_vals), use_container_width=True, hide_index=True)
+
+    # Section B: Regime Evidence
+    st.markdown("### B. Operating Environment Evidence")
+    src_regime = revid if revid is not None and not revid.empty else revbase
+    if src_regime is None or src_regime.empty:
+        st.caption("No regime evidence available.")
+    else:
+        r = src_regime.copy()
+        r["Date"] = pd.to_datetime(r["Date"], errors="coerce")
+        r = r.dropna(subset=["Date"]).sort_values("Date")
+        date_opts = [d.strftime("%Y-%m-%d") for d in r["Date"].tolist()]
+        sel = st.selectbox("Regime date", options=date_opts, index=len(date_opts) - 1, key="xpl_regime_date")
+        rr = r[r["Date"] == pd.to_datetime(sel)].tail(1).iloc[0]
+        c1, c2 = st.columns(2)
+        with c1:
+            st.metric("RegimeLabel", str(rr.get("RegimeLabel", "Unknown")))
+        with c2:
+            if "ConfidenceScore" in rr:
+                st.metric("ConfidenceScore", f"{float(rr.get('ConfidenceScore', 0.0)):.2f}")
+
+        st.caption(f"RuleTriggered: {rr.get('RuleTriggered', 'N/A')}")
+        st.caption(f"{rr.get('ShortExplanation', 'No explanation available.')}")
+
+        evjson = rr.get("EvidencePointsJSON", "{}")
+        try:
+            evmap = json.loads(str(evjson))
+        except Exception:
+            evmap = {}
+        if evmap:
+            edt = pd.DataFrame([{"Indicator": k, "Value": v} for k, v in evmap.items()])
+            st.dataframe(edt, use_container_width=True, hide_index=True)
+
+    # Section C: Systemic Risk Evidence
+    st.markdown("### C. Systemic Risk Evidence")
+    src_risk = kevid if kevid is not None and not kevid.empty else kbase
+    if src_risk is None or src_risk.empty:
+        st.caption("No risk evidence available.")
+    else:
+        k = src_risk.copy()
+        k["Date"] = pd.to_datetime(k["Date"], errors="coerce")
+        k = k.dropna(subset=["Date"]).sort_values("Date")
+        date_opts = [d.strftime("%Y-%m-%d") for d in k["Date"].tolist()]
+        sel = st.selectbox("Risk date", options=date_opts, index=len(date_opts) - 1, key="xpl_risk_date")
+        lookback_days = st.slider("Last N days", min_value=30, max_value=365, value=120, step=10, key="xpl_risk_lookback")
+        kr = k[k["Date"] == pd.to_datetime(sel)].tail(1).iloc[0]
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if "RiskScore" in kr:
+                st.metric("RiskScore", f"{float(kr.get('RiskScore', 0.0)):.2f}")
+        with c2:
+            st.metric("RiskLevel", str(kr.get("RiskLevel", "Unknown")))
+        if "TopRiskDrivers" in kr:
+            st.caption(f"TopRiskDrivers: {kr.get('TopRiskDrivers')}")
+        if "ShortExplanation" in kr:
+            st.caption(str(kr.get("ShortExplanation")))
+
+        evjson = kr.get("EvidencePointsJSON", "{}")
+        try:
+            evmap = json.loads(str(evjson))
+        except Exception:
+            evmap = {}
+        if evmap:
+            edt = pd.DataFrame([{"Indicator": k2, "Value": v2} for k2, v2 in evmap.items()])
+            st.dataframe(edt, use_container_width=True, hide_index=True)
+
+        ktail = k.tail(int(lookback_days)).copy()
+        if "RiskScore" in ktail.columns:
+            st.line_chart(ktail.set_index("Date")[["RiskScore"]])
+
+        ind_options = [c for c in ["VolatilityExpansion", "RapidDrawdown", "CorrelationSpike", "YieldCurveInversion", "RateShock"] if c in evmap]
+        if ind_options:
+            indicator = st.selectbox("Underlying indicator", options=ind_options, index=0, key="xpl_indicator")
+            ser_rows = []
+            for _, row in ktail.iterrows():
+                try:
+                    m = json.loads(str(row.get("EvidencePointsJSON", "{}")))
+                    ser_rows.append({"Date": row["Date"], "Value": m.get(indicator)})
+                except Exception:
+                    continue
+            sdt = pd.DataFrame(ser_rows).dropna()
+            if not sdt.empty:
+                st.line_chart(sdt.set_index("Date")[["Value"]].rename(columns={"Value": indicator}))
+
+
+_show_signal_banner()
+
+stock_tab, fi_tab, sim_tab, di_tab, ex_tab = st.tabs(
+    ["Stock Screener", "Bond & Treasury Screener", "Portfolio Decision Simulator", "Decision Intelligence", "Explainability and Evidence"]
+)
 with stock_tab:
     _show_stock_tab()
 with fi_tab:
     _show_fixed_income_tab()
 with sim_tab:
     _show_portfolio_simulator_tab()
+with di_tab:
+    _show_decision_intelligence_tab()
+with ex_tab:
+    _show_explainability_tab()

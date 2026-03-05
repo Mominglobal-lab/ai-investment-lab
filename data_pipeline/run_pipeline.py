@@ -23,6 +23,12 @@ from data_pipeline.data_fetcher import (
     refresh_prices_yfinance,
 )
 from data_pipeline.data_health_report import summarize_refresh_outcome
+from ai_models.feature_builder import build_feature_table
+from ai_models.quality_score_model import run_quality_score_model
+from ai_models.regime_detection_model import run_regime_detection_model
+from ai_models.risk_detector import run_systemic_risk_detector
+from ai_models.explainability_engine import build_quality_explanations
+from ai_models.evidence_builder import build_regime_evidence, build_risk_evidence
 
 
 @dataclass(frozen=True)
@@ -53,6 +59,24 @@ class PricesPipelineRunResult:
     requested_count: int
     success_count: int
     failure_count: int
+
+
+@dataclass(frozen=True)
+class ModelPipelineRunResult:
+    quality_scores: pd.DataFrame
+    regime_signals: pd.DataFrame
+    risk_signals: pd.DataFrame
+    wrote_artifacts: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class ExplainabilityPipelineRunResult:
+    quality_explanations: pd.DataFrame
+    regime_evidence: pd.DataFrame
+    risk_evidence: pd.DataFrame
+    wrote_artifacts: bool
+    reason: str
 
 
 def run_stock_fundamentals_pipeline(
@@ -366,6 +390,8 @@ def run_prices_cache_pipeline(
 def run_pipeline(
     *,
     build_prices_cache: bool = False,
+    run_models: bool = False,
+    run_explanations: bool = False,
     max_age_days: float = 7.0,
     stock_universe: str = "S&P 500",
     fi_universe: str = "US Treasuries",
@@ -379,8 +405,246 @@ def run_pipeline(
             max_age_days=max_age_days,
             benchmark_ticker=benchmark_ticker,
         )
+    model_result = None
+    if run_models:
+        model_result = run_decision_models_pipeline(benchmark_ticker=benchmark_ticker)
+    explain_result = None
+    if run_explanations:
+        explain_result = run_explainability_pipeline(benchmark_ticker=benchmark_ticker)
     return {
         "stock": stock_result,
         "fixed_income": fi_result,
         "prices": prices_result,
+        "models": model_result,
+        "explanations": explain_result,
     }
+
+
+def run_decision_models_pipeline(
+    *,
+    fundamentals_path: str = "data/fundamentals_cache.parquet",
+    prices_path: str = "data/prices_cache.parquet",
+    treasury_path: str = "data/treasury_yields_cache.parquet",
+    quality_out_path: str = "data/quality_scores_cache.parquet",
+    regime_out_path: str = "data/regime_cache.parquet",
+    risk_out_path: str = "data/risk_signals_cache.parquet",
+    model_registry_path: str = "data/model_registry.json",
+    model_health_path: str = "data/model_health_report.json",
+    benchmark_ticker: str = "SPY",
+) -> ModelPipelineRunResult:
+    feature_result = build_feature_table(
+        fundamentals_path=fundamentals_path,
+        prices_path=prices_path,
+        treasury_path=treasury_path,
+    )
+    features = feature_result.features.reset_index()
+
+    quality = run_quality_score_model(features)
+    regime = run_regime_detection_model(
+        prices_path=prices_path,
+        treasury_path=treasury_path,
+        benchmark_ticker=benchmark_ticker,
+    )
+    risk = run_systemic_risk_detector(
+        prices_path=prices_path,
+        treasury_path=treasury_path,
+        benchmark_ticker=benchmark_ticker,
+    )
+
+    ensure_parent_dir(quality_out_path)
+    ensure_parent_dir(regime_out_path)
+    ensure_parent_dir(risk_out_path)
+    save_parquet_atomic(quality, quality_out_path)
+    save_parquet_atomic(regime, regime_out_path)
+    save_parquet_atomic(risk, risk_out_path)
+
+    now = pd.Timestamp.utcnow().isoformat()
+    registry = {
+        "generated_at": now,
+        "models": [
+            {
+                "model_name": "quality_score_model",
+                "model_version": "1.0.0",
+                "feature_set_used": [
+                    "Revenue_Growth_YoY_Pct",
+                    "EBITDA_Margin",
+                    "ROE",
+                    "FreeCashFlow_Margin",
+                    "Volatility_63D",
+                    "Drawdown_252D",
+                ],
+                "training_or_evaluation_window": "cross-sectional latest snapshot",
+                "timestamp": now,
+                "evaluation_summary": {
+                    "rows_scored": int(len(quality)),
+                    "score_min": float(quality["QualityScore"].min()) if not quality.empty else None,
+                    "score_max": float(quality["QualityScore"].max()) if not quality.empty else None,
+                },
+            },
+            {
+                "model_name": "regime_detection_model",
+                "model_version": "1.0.0",
+                "feature_set_used": [
+                    "YieldSlope",
+                    "YieldInverted",
+                    "YieldVolatility",
+                    "Benchmark_Volatility",
+                    "Benchmark_Trend",
+                ],
+                "training_or_evaluation_window": "daily rule-based regime classification",
+                "timestamp": now,
+                "evaluation_summary": {
+                    "rows_scored": int(len(regime)),
+                    "latest_regime": str(regime["RegimeLabel"].iloc[-1]) if not regime.empty else None,
+                },
+            },
+            {
+                "model_name": "risk_detector",
+                "model_version": "1.0.0",
+                "feature_set_used": [
+                    "volatility_expansion",
+                    "drawdown_acceleration",
+                    "correlation_spike",
+                    "yield_inversion",
+                    "rate_shock",
+                ],
+                "training_or_evaluation_window": "daily rule-based systemic risk scoring",
+                "timestamp": now,
+                "evaluation_summary": {
+                    "rows_scored": int(len(risk)),
+                    "latest_risk_level": str(risk["RiskLevel"].iloc[-1]) if not risk.empty else None,
+                },
+            },
+        ],
+    }
+    write_json_report(registry, model_registry_path)
+
+    fund_status = get_cache_status(fundamentals_path, 365, required_columns=["Ticker"])
+    prices_status = get_cache_status(prices_path, 365, required_columns=["Ticker", "Date", "AdjClose"])
+    treasury_status = get_cache_status(treasury_path, 365, required_columns=[])
+    health = {
+        "generated_at": now,
+        "model_freshness": {
+            "quality_scores_cache": "fresh" if os.path.exists(quality_out_path) else "missing",
+            "regime_cache": "fresh" if os.path.exists(regime_out_path) else "missing",
+            "risk_signals_cache": "fresh" if os.path.exists(risk_out_path) else "missing",
+        },
+        "input_cache_coverage": {
+            "fundamentals_cache": {"exists": fund_status.exists, "schema_ok": fund_status.schema_ok},
+            "prices_cache": {"exists": prices_status.exists, "schema_ok": prices_status.schema_ok},
+            "treasury_yields_cache": {"exists": treasury_status.exists},
+        },
+        "missing_data_warnings": feature_result.warnings,
+        "feature_availability_indicators": feature_result.input_coverage,
+    }
+    write_json_report(health, model_health_path)
+
+    return ModelPipelineRunResult(
+        quality_scores=quality,
+        regime_signals=regime,
+        risk_signals=risk,
+        wrote_artifacts=True,
+        reason="model artifacts updated",
+    )
+
+
+def run_explainability_pipeline(
+    *,
+    benchmark_ticker: str = "SPY",
+    quality_scores_path: str = "data/quality_scores_cache.parquet",
+    regime_cache_path: str = "data/regime_cache.parquet",
+    risk_cache_path: str = "data/risk_signals_cache.parquet",
+    prices_path: str = "data/prices_cache.parquet",
+    treasury_path: str = "data/treasury_yields_cache.parquet",
+    quality_explain_path: str = "data/quality_explanations_cache.parquet",
+    regime_evidence_path: str = "data/regime_evidence_cache.parquet",
+    risk_evidence_path: str = "data/risk_evidence_cache.parquet",
+    model_registry_path: str = "data/model_registry.json",
+    model_health_path: str = "data/model_health_report.json",
+) -> ExplainabilityPipelineRunResult:
+    feature_result = build_feature_table(
+        fundamentals_path="data/fundamentals_cache.parquet",
+        prices_path=prices_path,
+        treasury_path=treasury_path,
+    )
+    feature_df = feature_result.features.reset_index()
+
+    quality_df, _qerr = read_parquet_safe(quality_scores_path)
+    regime_df, _rerr = read_parquet_safe(regime_cache_path)
+    risk_df, _kerr = read_parquet_safe(risk_cache_path)
+    prices_df, _perr = read_parquet_safe(prices_path)
+    treasury_df, _terr = read_parquet_safe(treasury_path)
+    if quality_df is None:
+        quality_df = pd.DataFrame(columns=["Ticker", "QualityScore", "QualityTier"])
+    if regime_df is None:
+        regime_df = pd.DataFrame(columns=["Date", "RegimeLabel", "ConfidenceScore"])
+    if risk_df is None:
+        risk_df = pd.DataFrame(columns=["Date", "RiskScore", "RiskLevel"])
+    if prices_df is None:
+        raise FileNotFoundError(f"Price cache missing or empty: {prices_path}")
+
+    quality_explain = build_quality_explanations(feature_df=feature_df, quality_df=quality_df)
+    regime_evidence = build_regime_evidence(prices_df=prices_df, treasury_df=treasury_df, regime_df=regime_df)
+    risk_evidence = build_risk_evidence(prices_df=prices_df, treasury_df=treasury_df, risk_df=risk_df)
+
+    save_parquet_atomic(quality_explain, quality_explain_path)
+    save_parquet_atomic(regime_evidence, regime_evidence_path)
+    save_parquet_atomic(risk_evidence, risk_evidence_path)
+
+    # Update registry and health with explanation artifact entries.
+    now = pd.Timestamp.utcnow().isoformat()
+    registry: dict = {}
+    try:
+        import json
+
+        with open(model_registry_path, "r", encoding="utf-8") as f:
+            registry = json.load(f)
+    except Exception:
+        registry = {"generated_at": now, "models": []}
+    registry.setdefault("models", [])
+    registry["generated_at"] = now
+    registry["models"].append(
+        {
+            "model_name": "explainability_layer",
+            "model_version": "1.0.0",
+            "feature_set_used": [
+                "quality component percentiles",
+                "yield curve and benchmark regime indicators",
+                "systemic risk indicator decomposition",
+            ],
+            "training_or_evaluation_window": "latest cached artifacts",
+            "timestamp": now,
+            "evaluation_summary": {
+                "quality_explanations_rows": int(len(quality_explain)),
+                "regime_evidence_rows": int(len(regime_evidence)),
+                "risk_evidence_rows": int(len(risk_evidence)),
+            },
+        }
+    )
+    write_json_report(registry, model_registry_path)
+
+    health: dict = {}
+    try:
+        import json
+
+        with open(model_health_path, "r", encoding="utf-8") as f:
+            health = json.load(f)
+    except Exception:
+        health = {"generated_at": now}
+    health["generated_at"] = now
+    health["explanation_coverage"] = {
+        "quality_explanations_cache": {"rows": int(len(quality_explain)), "path": quality_explain_path},
+        "regime_evidence_cache": {"rows": int(len(regime_evidence)), "path": regime_evidence_path},
+        "risk_evidence_cache": {"rows": int(len(risk_evidence)), "path": risk_evidence_path},
+    }
+    health.setdefault("missing_data_warnings", [])
+    health["missing_data_warnings"] = list(dict.fromkeys(list(health["missing_data_warnings"]) + feature_result.warnings))
+    write_json_report(health, model_health_path)
+
+    return ExplainabilityPipelineRunResult(
+        quality_explanations=quality_explain,
+        regime_evidence=regime_evidence,
+        risk_evidence=risk_evidence,
+        wrote_artifacts=True,
+        reason="explainability artifacts updated",
+    )
