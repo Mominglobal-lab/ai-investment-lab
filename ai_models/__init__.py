@@ -4,3 +4,5 @@ from ai_models.regime_detection_model import run_regime_detection_model
 from ai_models.risk_detector import run_systemic_risk_detector
 from ai_models.explainability_engine import build_quality_explanations
 from ai_models.evidence_builder import build_regime_evidence, build_risk_evidence
+from ai_models.uncertainty_engine import build_quality_uncertainty, build_risk_uncertainty
+from ai_models.probability_calibrator import build_regime_probabilities

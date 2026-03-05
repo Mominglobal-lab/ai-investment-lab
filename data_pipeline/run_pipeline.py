@@ -29,6 +29,8 @@ from ai_models.regime_detection_model import run_regime_detection_model
 from ai_models.risk_detector import run_systemic_risk_detector
 from ai_models.explainability_engine import build_quality_explanations
 from ai_models.evidence_builder import build_regime_evidence, build_risk_evidence
+from ai_models.uncertainty_engine import build_quality_uncertainty, build_risk_uncertainty
+from ai_models.probability_calibrator import build_regime_probabilities
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,15 @@ class ExplainabilityPipelineRunResult:
     quality_explanations: pd.DataFrame
     regime_evidence: pd.DataFrame
     risk_evidence: pd.DataFrame
+    wrote_artifacts: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class UncertaintyPipelineRunResult:
+    quality_uncertainty: pd.DataFrame
+    regime_probabilities: pd.DataFrame
+    risk_uncertainty: pd.DataFrame
     wrote_artifacts: bool
     reason: str
 
@@ -392,6 +403,7 @@ def run_pipeline(
     build_prices_cache: bool = False,
     run_models: bool = False,
     run_explanations: bool = False,
+    run_uncertainty: bool = False,
     max_age_days: float = 7.0,
     stock_universe: str = "S&P 500",
     fi_universe: str = "US Treasuries",
@@ -411,12 +423,16 @@ def run_pipeline(
     explain_result = None
     if run_explanations:
         explain_result = run_explainability_pipeline(benchmark_ticker=benchmark_ticker)
+    uncertainty_result = None
+    if run_uncertainty:
+        uncertainty_result = run_uncertainty_pipeline(benchmark_ticker=benchmark_ticker)
     return {
         "stock": stock_result,
         "fixed_income": fi_result,
         "prices": prices_result,
         "models": model_result,
         "explanations": explain_result,
+        "uncertainty": uncertainty_result,
     }
 
 
@@ -647,4 +663,103 @@ def run_explainability_pipeline(
         risk_evidence=risk_evidence,
         wrote_artifacts=True,
         reason="explainability artifacts updated",
+    )
+
+
+def run_uncertainty_pipeline(
+    *,
+    benchmark_ticker: str = "SPY",
+    prices_path: str = "data/prices_cache.parquet",
+    treasury_path: str = "data/treasury_yields_cache.parquet",
+    quality_scores_path: str = "data/quality_scores_cache.parquet",
+    regime_cache_path: str = "data/regime_cache.parquet",
+    risk_cache_path: str = "data/risk_signals_cache.parquet",
+    quality_uncertainty_path: str = "data/quality_uncertainty_cache.parquet",
+    regime_prob_path: str = "data/regime_probabilities_cache.parquet",
+    risk_uncertainty_path: str = "data/risk_uncertainty_cache.parquet",
+    model_registry_path: str = "data/model_registry.json",
+    model_health_path: str = "data/model_health_report.json",
+) -> UncertaintyPipelineRunResult:
+    feature_result = build_feature_table(
+        fundamentals_path="data/fundamentals_cache.parquet",
+        prices_path=prices_path,
+        treasury_path=treasury_path,
+    )
+    feature_df = feature_result.features.reset_index()
+
+    quality_df, _qerr = read_parquet_safe(quality_scores_path)
+    regime_df, _rerr = read_parquet_safe(regime_cache_path)
+    risk_df, _kerr = read_parquet_safe(risk_cache_path)
+    if quality_df is None:
+        quality_df = pd.DataFrame(columns=["Ticker", "QualityScore", "QualityTier"])
+    if regime_df is None:
+        regime_df = pd.DataFrame(columns=["Date", "RegimeLabel", "ConfidenceScore"])
+    if risk_df is None:
+        risk_df = pd.DataFrame(columns=["Date", "RiskScore", "RiskLevel"])
+
+    q_unc = build_quality_uncertainty(feature_df=feature_df, quality_df=quality_df, n_boot=300, seed=42)
+    r_prob = build_regime_probabilities(regime_df=regime_df, window=20)
+    k_unc = build_risk_uncertainty(risk_df=risk_df, window=252)
+
+    save_parquet_atomic(q_unc, quality_uncertainty_path)
+    save_parquet_atomic(r_prob, regime_prob_path)
+    save_parquet_atomic(k_unc, risk_uncertainty_path)
+
+    now = pd.Timestamp.utcnow().isoformat()
+    registry: dict = {}
+    try:
+        import json
+
+        with open(model_registry_path, "r", encoding="utf-8") as f:
+            registry = json.load(f)
+    except Exception:
+        registry = {"generated_at": now, "models": []}
+    registry.setdefault("models", [])
+    registry["generated_at"] = now
+    registry["models"].append(
+        {
+            "model_name": "uncertainty_layer",
+            "model_version": "1.0.0",
+            "feature_set_used": [
+                "quality bootstrap score bands",
+                "regime confidence-to-probability mapping",
+                "risk rolling movement bands",
+            ],
+            "training_or_evaluation_window": "latest cached artifacts",
+            "timestamp": now,
+            "evaluation_summary": {
+                "quality_uncertainty_rows": int(len(q_unc)),
+                "regime_probabilities_rows": int(len(r_prob)),
+                "risk_uncertainty_rows": int(len(k_unc)),
+            },
+        }
+    )
+    write_json_report(registry, model_registry_path)
+
+    health: dict = {}
+    try:
+        import json
+
+        with open(model_health_path, "r", encoding="utf-8") as f:
+            health = json.load(f)
+    except Exception:
+        health = {"generated_at": now}
+    health["generated_at"] = now
+    health["uncertainty_coverage"] = {
+        "quality_uncertainty_cache": {"rows": int(len(q_unc)), "path": quality_uncertainty_path},
+        "regime_probabilities_cache": {"rows": int(len(r_prob)), "path": regime_prob_path},
+        "risk_uncertainty_cache": {"rows": int(len(k_unc)), "path": risk_uncertainty_path},
+    }
+    health.setdefault("runtime_notes", [])
+    health["runtime_notes"] = list(
+        dict.fromkeys(list(health["runtime_notes"]) + ["Quality uncertainty uses deterministic bootstrap with seed=42."])
+    )
+    write_json_report(health, model_health_path)
+
+    return UncertaintyPipelineRunResult(
+        quality_uncertainty=q_unc,
+        regime_probabilities=r_prob,
+        risk_uncertainty=k_unc,
+        wrote_artifacts=True,
+        reason="uncertainty artifacts updated",
     )

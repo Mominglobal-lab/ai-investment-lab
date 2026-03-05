@@ -39,6 +39,9 @@ RISK_CACHE_PATH = "data/risk_signals_cache.parquet"
 QUALITY_EXPLAIN_PATH = "data/quality_explanations_cache.parquet"
 REGIME_EVIDENCE_PATH = "data/regime_evidence_cache.parquet"
 RISK_EVIDENCE_PATH = "data/risk_evidence_cache.parquet"
+QUALITY_UNCERTAINTY_PATH = "data/quality_uncertainty_cache.parquet"
+REGIME_PROB_PATH = "data/regime_probabilities_cache.parquet"
+RISK_UNCERTAINTY_PATH = "data/risk_uncertainty_cache.parquet"
 
 
 def _apply_premium_theme() -> None:
@@ -1568,10 +1571,144 @@ def _show_explainability_tab() -> None:
                 st.line_chart(sdt.set_index("Date")[["Value"]].rename(columns={"Value": indicator}))
 
 
+def _show_uncertainty_tab() -> None:
+    st.markdown("## Uncertainty and Confidence")
+
+    qu, _qe = read_parquet_safe(QUALITY_UNCERTAINTY_PATH)
+    rp, _re = read_parquet_safe(REGIME_PROB_PATH)
+    ru, _ru = read_parquet_safe(RISK_UNCERTAINTY_PATH)
+    qbase, _qb = read_parquet_safe(QUALITY_CACHE_PATH)
+    rbase, _rb = read_parquet_safe(REGIME_CACHE_PATH)
+    kbase, _kb = read_parquet_safe(RISK_CACHE_PATH)
+
+    # Section A
+    st.markdown("### A. QualityScore Uncertainty")
+    src_q = qu if qu is not None and not qu.empty else qbase
+    if src_q is None or src_q.empty:
+        st.caption("Quality uncertainty cache missing and no quality score fallback available.")
+    else:
+        q = src_q.copy()
+        q["Ticker"] = q["Ticker"].astype(str).str.upper().str.strip()
+        tickers = sorted(q["Ticker"].dropna().unique().tolist())
+        t = st.selectbox("Ticker", options=tickers, index=0, key="unc_ticker")
+        row = q[q["Ticker"] == t].head(1).iloc[0]
+
+        if {"ScoreP10", "ScoreP50", "ScoreP90", "TierMostLikely", "TierStability"}.issubset(set(q.columns)):
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric("ScoreP10", f"{float(row['ScoreP10']):.2f}")
+            with c2:
+                st.metric("ScoreP50", f"{float(row['ScoreP50']):.2f}")
+            with c3:
+                st.metric("ScoreP90", f"{float(row['ScoreP90']):.2f}")
+            with c4:
+                st.metric("TierStability", f"{float(row['TierStability']):.2f}")
+            st.caption(
+                f"TierMostLikely: {row.get('TierMostLikely', 'Unknown')}. "
+                f"Tier stability is {float(row.get('TierStability', 0.0)):.2f}, "
+                "which indicates how stable the tier is under feature noise."
+            )
+            show_chart = st.checkbox("Show uncertainty band chart", value=True, key="unc_show_q_chart")
+            if show_chart:
+                band_df = pd.DataFrame(
+                    {
+                        "Level": ["P10", "P50", "P90"],
+                        "Score": [float(row["ScoreP10"]), float(row["ScoreP50"]), float(row["ScoreP90"])],
+                    }
+                )
+                st.bar_chart(band_df.set_index("Level"))
+        else:
+            st.warning("Uncertainty cache missing. Showing point estimate only.")
+            st.metric("QualityScore", f"{float(row.get('QualityScore', 0.0)):.2f}")
+
+    # Section B
+    st.markdown("### B. Regime Probabilities")
+    src_r = rp if rp is not None and not rp.empty else rbase
+    if src_r is None or src_r.empty:
+        st.caption("Regime probabilities cache missing and no regime fallback available.")
+    else:
+        r = src_r.copy()
+        r["Date"] = pd.to_datetime(r["Date"], errors="coerce")
+        r = r.dropna(subset=["Date"]).sort_values("Date")
+        dates = [d.strftime("%Y-%m-%d") for d in r["Date"].tolist()]
+        sel = st.selectbox("Regime probability date", options=dates, index=len(dates) - 1, key="unc_regime_date")
+        row = r[r["Date"] == pd.to_datetime(sel)].tail(1).iloc[0]
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.metric("RegimeLabel", str(row.get("RegimeLabel", "Unknown")))
+        with c2:
+            st.metric("ConfidenceScore", f"{float(row.get('ConfidenceScore', 0.0)):.2f}")
+
+        if {"P_RiskOn", "P_Neutral", "P_RiskOff"}.issubset(set(r.columns)):
+            prob_df = pd.DataFrame(
+                [
+                    {"Regime": "Risk On", "Probability": float(row["P_RiskOn"])},
+                    {"Regime": "Neutral", "Probability": float(row["P_Neutral"])},
+                    {"Regime": "Risk Off", "Probability": float(row["P_RiskOff"])},
+                ]
+            )
+            st.dataframe(prob_df, use_container_width=True, hide_index=True)
+            st.bar_chart(prob_df.set_index("Regime"))
+            if "RegimeStability_20d" in row:
+                st.caption(f"RegimeStability_20d: {float(row['RegimeStability_20d']):.2f}")
+        else:
+            st.warning("Probability cache missing. Showing only point label and confidence.")
+
+    # Section C
+    st.markdown("### C. Risk Uncertainty")
+    src_k = ru if ru is not None and not ru.empty else kbase
+    if src_k is None or src_k.empty:
+        st.caption("Risk uncertainty cache missing and no risk fallback available.")
+    else:
+        k = src_k.copy()
+        k["Date"] = pd.to_datetime(k["Date"], errors="coerce")
+        k = k.dropna(subset=["Date"]).sort_values("Date")
+        dates = [d.strftime("%Y-%m-%d") for d in k["Date"].tolist()]
+        sel = st.selectbox("Risk uncertainty date", options=dates, index=len(dates) - 1, key="unc_risk_date")
+        lookback = st.slider("Last N days", min_value=30, max_value=365, value=60, step=10, key="unc_risk_lookback")
+        row = k[k["Date"] == pd.to_datetime(sel)].tail(1).iloc[0]
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("RiskScore", f"{float(row.get('RiskScore', 0.0)):.2f}")
+        if {"RiskP10", "RiskP50", "RiskP90"}.issubset(set(k.columns)):
+            with c2:
+                st.metric("RiskP10", f"{float(row.get('RiskP10', 0.0)):.2f}")
+            with c3:
+                st.metric("RiskP50", f"{float(row.get('RiskP50', 0.0)):.2f}")
+            with c4:
+                st.metric("RiskP90", f"{float(row.get('RiskP90', 0.0)):.2f}")
+            st.caption(
+                f"RiskLevelMostLikely: {row.get('RiskLevelMostLikely', 'Unknown')} | "
+                f"RiskLevelStability: {float(row.get('RiskLevelStability', 0.0)):.2f}"
+            )
+            tail = k.tail(int(lookback)).copy()
+            if {"RiskP10", "RiskP90"}.issubset(set(tail.columns)):
+                plot_df = tail[["Date", "RiskScore", "RiskP10", "RiskP90"]].dropna()
+                line = alt.Chart(plot_df).mark_line(color="#ff9f43").encode(x="Date:T", y="RiskScore:Q")
+                band = alt.Chart(plot_df).mark_area(opacity=0.2, color="#ff9f43").encode(
+                    x="Date:T",
+                    y="RiskP10:Q",
+                    y2="RiskP90:Q",
+                )
+                st.altair_chart((band + line).properties(height=280), use_container_width=True)
+        else:
+            st.warning("Uncertainty cache missing. Showing only point estimate.")
+            st.caption(f"RiskLevel: {row.get('RiskLevel', 'Unknown')}")
+
+
 _show_signal_banner()
 
-stock_tab, fi_tab, sim_tab, di_tab, ex_tab = st.tabs(
-    ["Stock Screener", "Bond & Treasury Screener", "Portfolio Decision Simulator", "Decision Intelligence", "Explainability and Evidence"]
+stock_tab, fi_tab, sim_tab, di_tab, ex_tab, un_tab = st.tabs(
+    [
+        "Stock Screener",
+        "Bond & Treasury Screener",
+        "Portfolio Decision Simulator",
+        "Decision Intelligence",
+        "Explainability and Evidence",
+        "Uncertainty and Confidence",
+    ]
 )
 with stock_tab:
     _show_stock_tab()
@@ -1583,3 +1720,5 @@ with di_tab:
     _show_decision_intelligence_tab()
 with ex_tab:
     _show_explainability_tab()
+with un_tab:
+    _show_uncertainty_tab()
