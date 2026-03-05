@@ -1742,8 +1742,9 @@ def _show_monitoring_tab() -> None:
         st.caption("No alerts available.")
     else:
         a = alert_df.copy()
-        a["Date"] = pd.to_datetime(a["Date"], errors="coerce")
-        recent = a[a["Date"] >= (pd.Timestamp.utcnow() - pd.Timedelta(days=30))].sort_values("Date", ascending=False)
+        a["Date"] = pd.to_datetime(a["Date"], errors="coerce", utc=True).dt.tz_localize(None)
+        cutoff = pd.Timestamp.now(tz="UTC").tz_localize(None) - pd.Timedelta(days=30)
+        recent = a[a["Date"] >= cutoff].sort_values("Date", ascending=False)
         if recent.empty:
             recent = a.sort_values("Date", ascending=False).head(30)
         cols = [c for c in ["Severity", "AlertType", "Title", "Date"] if c in recent.columns]
