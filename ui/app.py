@@ -42,6 +42,10 @@ RISK_EVIDENCE_PATH = "data/risk_evidence_cache.parquet"
 QUALITY_UNCERTAINTY_PATH = "data/quality_uncertainty_cache.parquet"
 REGIME_PROB_PATH = "data/regime_probabilities_cache.parquet"
 RISK_UNCERTAINTY_PATH = "data/risk_uncertainty_cache.parquet"
+DRIFT_SIGNALS_PATH = "data/drift_signals_cache.parquet"
+DRIFT_REPORT_PATH = "data/drift_report.json"
+ALERT_LOG_PATH = "data/alert_log.parquet"
+MONITORING_HEALTH_PATH = "data/monitoring_health_report.json"
 
 
 def _apply_premium_theme() -> None:
@@ -1698,9 +1702,137 @@ def _show_uncertainty_tab() -> None:
             st.caption(f"RiskLevel: {row.get('RiskLevel', 'Unknown')}")
 
 
+def _show_monitoring_tab() -> None:
+    st.markdown("## Drift, Monitoring, and Early Warning")
+
+    import json
+
+    drift_df, _de = read_parquet_safe(DRIFT_SIGNALS_PATH)
+    alert_df, _ae = read_parquet_safe(ALERT_LOG_PATH)
+    regime_df, _re = read_parquet_safe(REGIME_CACHE_PATH)
+    risk_df, _rk = read_parquet_safe(RISK_CACHE_PATH)
+
+    if drift_df is None or drift_df.empty:
+        st.warning("Monitoring artifacts missing. Run pipeline with run_monitoring=True.")
+        return
+
+    # Section A: summary
+    st.markdown("### A. Monitoring Summary")
+    worst = "Stable"
+    if (drift_df["DriftLevel"] == "Severe").any():
+        worst = "Severe"
+    elif (drift_df["DriftLevel"] == "Drift").any():
+        worst = "Drift"
+    signal_unstable = "Unstable" if ((drift_df["MetricType"] == "Signal") & (drift_df["DriftLevel"] != "Stable")).any() else "Stable"
+    crit = int(((alert_df is not None) and (not alert_df.empty) and (alert_df["Severity"] == "Critical").sum()) or 0)
+    warn = int(((alert_df is not None) and (not alert_df.empty) and (alert_df["Severity"] == "Warning").sum()) or 0)
+    info = int(((alert_df is not None) and (not alert_df.empty) and (alert_df["Severity"] == "Info").sum()) or 0)
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Feature Drift", worst)
+    with c2:
+        st.metric("Signal Stability", signal_unstable)
+    with c3:
+        st.metric("Active Alerts", f"C:{crit} W:{warn} I:{info}")
+
+    # Section B: alerts
+    st.markdown("### B. Active Alerts")
+    if alert_df is None or alert_df.empty:
+        st.caption("No alerts available.")
+    else:
+        a = alert_df.copy()
+        a["Date"] = pd.to_datetime(a["Date"], errors="coerce")
+        recent = a[a["Date"] >= (pd.Timestamp.utcnow() - pd.Timedelta(days=30))].sort_values("Date", ascending=False)
+        if recent.empty:
+            recent = a.sort_values("Date", ascending=False).head(30)
+        cols = [c for c in ["Severity", "AlertType", "Title", "Date"] if c in recent.columns]
+        st.dataframe(recent[cols], use_container_width=True, hide_index=True)
+
+        choices = [f"{r.Severity} | {r.AlertType} | {r.Date:%Y-%m-%d}" for r in recent.itertuples()]
+        idx = st.selectbox("Select alert", options=list(range(len(choices))), format_func=lambda i: choices[i], key="mon_alert_pick")
+        row = recent.iloc[int(idx)]
+        st.caption(str(row.get("Description", "")))
+        try:
+            ev = json.loads(str(row.get("EvidenceJSON", "{}")))
+            st.json(ev)
+        except Exception:
+            st.caption("Evidence JSON unavailable.")
+        st.caption(f"Suggested action: {row.get('SuggestedAction', 'N/A')}")
+
+    # Section C: drift dashboard
+    st.markdown("### C. Drift Dashboard")
+    levels = ["All", "Stable", "Drift", "Severe"]
+    types = ["All", "Feature", "Signal"]
+    c1, c2 = st.columns(2)
+    with c1:
+        level_pick = st.selectbox("DriftLevel filter", options=levels, index=0, key="mon_level_filter")
+    with c2:
+        type_pick = st.selectbox("MetricType filter", options=types, index=0, key="mon_type_filter")
+    d = drift_df.copy()
+    if level_pick != "All":
+        d = d[d["DriftLevel"] == level_pick]
+    if type_pick != "All":
+        d = d[d["MetricType"] == type_pick]
+    d = d.sort_values("DriftScore", ascending=False)
+    st.dataframe(d, use_container_width=True, hide_index=True)
+
+    if not drift_df.empty:
+        metric_names = sorted(drift_df["MetricName"].astype(str).unique().tolist())
+        sel_metric = st.selectbox("Drift metric trend", options=metric_names, index=0, key="mon_metric_trend")
+        trend = drift_df[drift_df["MetricName"] == sel_metric].copy()
+        if not trend.empty:
+            trend["Date"] = pd.to_datetime(trend["Date"], errors="coerce")
+            st.line_chart(trend.set_index("Date")[["DriftScore"]])
+
+    # Section D: signal stability
+    st.markdown("### D. Signal Stability")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if regime_df is not None and not regime_df.empty and "RegimeLabel" in regime_df.columns:
+            rr = regime_df.copy()
+            rr["Date"] = pd.to_datetime(rr["Date"], errors="coerce")
+            rr = rr.dropna(subset=["Date"]).sort_values("Date").tail(60)
+            flip = float((rr["RegimeLabel"] != rr["RegimeLabel"].shift(1)).mean()) if len(rr) > 1 else 0.0
+            avg_conf = float(pd.to_numeric(rr.get("ConfidenceScore"), errors="coerce").mean()) if "ConfidenceScore" in rr.columns else float("nan")
+            st.metric("Regime Flip Rate (60d)", f"{flip:.2f}")
+            if pd.notna(avg_conf):
+                st.caption(f"Avg confidence (60d): {avg_conf:.2f}")
+    with c2:
+        if risk_df is not None and not risk_df.empty and "RiskScore" in risk_df.columns:
+            rk = risk_df.copy()
+            rk["Date"] = pd.to_datetime(rk["Date"], errors="coerce")
+            rk["RiskScore"] = pd.to_numeric(rk["RiskScore"], errors="coerce")
+            rk = rk.dropna(subset=["Date", "RiskScore"]).sort_values("Date").tail(60)
+            vol = float(rk["RiskScore"].std(ddof=1)) if len(rk) > 1 else 0.0
+            chg = int((rk["RiskLevel"] != rk["RiskLevel"].shift(1)).sum()) if "RiskLevel" in rk.columns else 0
+            st.metric("RiskScore Volatility (60d)", f"{vol:.2f}")
+            st.caption(f"Risk level changes (60d): {chg}")
+    with c3:
+        q_proxy = drift_df[drift_df["MetricName"] == "QualityProxyDrift"]
+        if not q_proxy.empty:
+            val = float(q_proxy["DriftScore"].iloc[-1])
+            st.metric("Quality Instability Proxy", f"{val:.3f}")
+
+    # Optional monitoring reports
+    st.markdown("#### Monitoring Reports")
+    try:
+        with open(DRIFT_REPORT_PATH, "r", encoding="utf-8") as f:
+            dr = json.load(f)
+        st.json(dr)
+    except Exception:
+        st.caption("drift_report.json not available.")
+    try:
+        with open(MONITORING_HEALTH_PATH, "r", encoding="utf-8") as f:
+            mh = json.load(f)
+        st.json(mh)
+    except Exception:
+        st.caption("monitoring_health_report.json not available.")
+
+
 _show_signal_banner()
 
-stock_tab, fi_tab, sim_tab, di_tab, ex_tab, un_tab = st.tabs(
+stock_tab, fi_tab, sim_tab, di_tab, ex_tab, un_tab, mon_tab = st.tabs(
     [
         "Stock Screener",
         "Bond & Treasury Screener",
@@ -1708,6 +1840,7 @@ stock_tab, fi_tab, sim_tab, di_tab, ex_tab, un_tab = st.tabs(
         "Decision Intelligence",
         "Explainability and Evidence",
         "Uncertainty and Confidence",
+        "Drift, Monitoring, and Early Warning",
     ]
 )
 with stock_tab:
@@ -1722,3 +1855,5 @@ with ex_tab:
     _show_explainability_tab()
 with un_tab:
     _show_uncertainty_tab()
+with mon_tab:
+    _show_monitoring_tab()

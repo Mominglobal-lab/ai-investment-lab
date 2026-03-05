@@ -31,6 +31,9 @@ from ai_models.explainability_engine import build_quality_explanations
 from ai_models.evidence_builder import build_regime_evidence, build_risk_evidence
 from ai_models.uncertainty_engine import build_quality_uncertainty, build_risk_uncertainty
 from ai_models.probability_calibrator import build_regime_probabilities
+from ai_models.drift_engine import compute_feature_drift, compute_signal_instability
+from ai_models.monitoring_engine import build_drift_report, build_monitoring_health_report
+from ai_models.alert_engine import generate_alerts
 
 
 @dataclass(frozen=True)
@@ -86,6 +89,14 @@ class UncertaintyPipelineRunResult:
     quality_uncertainty: pd.DataFrame
     regime_probabilities: pd.DataFrame
     risk_uncertainty: pd.DataFrame
+    wrote_artifacts: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class MonitoringPipelineRunResult:
+    drift_signals: pd.DataFrame
+    alerts: pd.DataFrame
     wrote_artifacts: bool
     reason: str
 
@@ -404,6 +415,7 @@ def run_pipeline(
     run_models: bool = False,
     run_explanations: bool = False,
     run_uncertainty: bool = False,
+    run_monitoring: bool = False,
     max_age_days: float = 7.0,
     stock_universe: str = "S&P 500",
     fi_universe: str = "US Treasuries",
@@ -426,6 +438,9 @@ def run_pipeline(
     uncertainty_result = None
     if run_uncertainty:
         uncertainty_result = run_uncertainty_pipeline(benchmark_ticker=benchmark_ticker)
+    monitoring_result = None
+    if run_monitoring:
+        monitoring_result = run_monitoring_pipeline(benchmark_ticker=benchmark_ticker)
     return {
         "stock": stock_result,
         "fixed_income": fi_result,
@@ -433,6 +448,7 @@ def run_pipeline(
         "models": model_result,
         "explanations": explain_result,
         "uncertainty": uncertainty_result,
+        "monitoring": monitoring_result,
     }
 
 
@@ -762,4 +778,232 @@ def run_uncertainty_pipeline(
         risk_uncertainty=k_unc,
         wrote_artifacts=True,
         reason="uncertainty artifacts updated",
+    )
+
+
+def _build_feature_history_for_monitoring(
+    prices_df: pd.DataFrame,
+    fundamentals_df: pd.DataFrame | None,
+    treasury_df: pd.DataFrame | None,
+    benchmark_ticker: str = "SPY",
+) -> tuple[pd.DataFrame, list[str]]:
+    warnings: list[str] = []
+    px = prices_df.copy()
+    px["Ticker"] = px["Ticker"].astype(str).str.upper().str.strip()
+    px["Date"] = pd.to_datetime(px["Date"], errors="coerce")
+    px["AdjClose"] = pd.to_numeric(px["AdjClose"], errors="coerce")
+    px = px.dropna(subset=["Ticker", "Date", "AdjClose"]).sort_values(["Ticker", "Date"])
+
+    rows: list[dict[str, object]] = []
+    for t, g in px.groupby("Ticker"):
+        s = g.set_index("Date")["AdjClose"].sort_index()
+        r = s.pct_change()
+        mom252 = s.pct_change(252)
+        vol63 = r.rolling(63, min_periods=10).std() * (252 ** 0.5)
+        roll_max = s.rolling(252, min_periods=30).max()
+        dd252 = (s / roll_max) - 1.0
+        tmp = pd.DataFrame(
+            {
+                "Date": s.index,
+                "Ticker": t,
+                "Momentum_252d": mom252.values,
+                "Volatility_63d": vol63.values,
+                "MaxDrawdown_252d": dd252.values,
+            }
+        )
+        rows.extend(tmp.to_dict(orient="records"))
+    fh = pd.DataFrame(rows)
+
+    # Benchmark volatility series
+    b = px[px["Ticker"] == benchmark_ticker.upper()].sort_values("Date")
+    if b.empty:
+        warnings.append(f"Benchmark {benchmark_ticker} missing for benchmark volatility feature.")
+        fh["BenchmarkVolatility_63d"] = pd.NA
+    else:
+        bs = b.set_index("Date")["AdjClose"].sort_index()
+        bv = bs.pct_change().rolling(63, min_periods=10).std() * (252 ** 0.5)
+        bdf = pd.DataFrame({"Date": bs.index, "BenchmarkVolatility_63d": bv.values})
+        fh = fh.merge(bdf, on="Date", how="left")
+
+    # Fundamentals static features
+    if fundamentals_df is not None and not fundamentals_df.empty and "Ticker" in fundamentals_df.columns:
+        f = fundamentals_df.copy()
+        f["Ticker"] = f["Ticker"].astype(str).str.upper().str.strip()
+        fmap = f.set_index("Ticker")
+        for tgt, src in [
+            ("RevenueGrowth", "Revenue_Growth_YoY_Pct"),
+            ("EBITDAMargin", "EBITDA_Margin"),
+            ("ROE", "ROE"),
+            ("FCFMargin", "FreeCashFlow_Margin"),
+        ]:
+            if src in fmap.columns:
+                fh[tgt] = fh["Ticker"].map(pd.to_numeric(fmap[src], errors="coerce"))
+            else:
+                fh[tgt] = pd.NA
+                warnings.append(f"Fundamentals missing {src}; {tgt} unavailable.")
+    else:
+        for tgt in ["RevenueGrowth", "EBITDAMargin", "ROE", "FCFMargin"]:
+            fh[tgt] = pd.NA
+        warnings.append("Fundamentals cache missing for monitoring features.")
+
+    # Yield slope optional
+    fh["YC_Slope_10Y_2Y"] = pd.NA
+    if treasury_df is not None and not treasury_df.empty:
+        t = treasury_df.copy()
+        cols = list(t.columns)
+        canon = {c.lower().replace("_", "").replace(" ", ""): c for c in cols}
+        dcol = canon.get("date") or canon.get("timestamp") or canon.get("asofdate")
+        y10 = canon.get("10y") or canon.get("dgs10") or canon.get("yield10y")
+        y2 = canon.get("2y") or canon.get("dgs2") or canon.get("yield2y")
+        y3 = canon.get("3m") or canon.get("dgs3mo") or canon.get("yield3m")
+        if dcol and y10 and (y2 or y3):
+            t["Date"] = pd.to_datetime(t[dcol], errors="coerce")
+            s10 = pd.to_numeric(t[y10], errors="coerce")
+            ss = pd.to_numeric(t[y2], errors="coerce") if y2 else pd.to_numeric(t[y3], errors="coerce")
+            ydf = pd.DataFrame({"Date": t["Date"], "YC_Slope_10Y_2Y": s10 - ss}).dropna(subset=["Date"])
+            fh = fh.merge(ydf, on="Date", how="left")
+        else:
+            warnings.append("Treasury cache missing yield columns for YC slope.")
+    else:
+        warnings.append("Treasury cache missing for yield-curve monitoring feature.")
+
+    fh["Date"] = pd.to_datetime(fh["Date"], errors="coerce")
+    fh = fh.dropna(subset=["Date"]).sort_values(["Date", "Ticker"]).reset_index(drop=True)
+    return fh, warnings
+
+
+def run_monitoring_pipeline(
+    *,
+    benchmark_ticker: str = "SPY",
+    prices_path: str = "data/prices_cache.parquet",
+    fundamentals_path: str = "data/fundamentals_cache.parquet",
+    treasury_path: str = "data/treasury_yields_cache.parquet",
+    regime_path: str = "data/regime_cache.parquet",
+    risk_path: str = "data/risk_signals_cache.parquet",
+    drift_signals_path: str = "data/drift_signals_cache.parquet",
+    drift_report_path: str = "data/drift_report.json",
+    alert_log_path: str = "data/alert_log.parquet",
+    monitoring_health_path: str = "data/monitoring_health_report.json",
+    model_registry_path: str = "data/model_registry.json",
+    model_health_path: str = "data/model_health_report.json",
+) -> MonitoringPipelineRunResult:
+    prices_df, _p = read_parquet_safe(prices_path)
+    if prices_df is None or prices_df.empty:
+        raise FileNotFoundError(f"Price cache missing or empty: {prices_path}")
+    fundamentals_df, _f = read_parquet_safe(fundamentals_path)
+    treasury_df, _t = read_parquet_safe(treasury_path)
+    regime_df, _r = read_parquet_safe(regime_path)
+    risk_df, _k = read_parquet_safe(risk_path)
+
+    fh, warnings = _build_feature_history_for_monitoring(
+        prices_df=prices_df,
+        fundamentals_df=fundamentals_df,
+        treasury_df=treasury_df,
+        benchmark_ticker=benchmark_ticker,
+    )
+    if fh.empty:
+        raise ValueError("Feature history empty; cannot compute drift.")
+    latest = fh["Date"].max()
+    current_end = latest
+    current_start = latest - pd.tseries.offsets.BDay(59)
+    baseline_end = latest - pd.tseries.offsets.BDay(60)
+    baseline_start = baseline_end - pd.tseries.offsets.BDay(251)
+    if baseline_start < fh["Date"].min():
+        baseline_start = fh["Date"].min()
+        warnings.append("Insufficient history for default baseline window; used shorter baseline window.")
+    if current_start < fh["Date"].min():
+        current_start = fh["Date"].min()
+        warnings.append("Insufficient history for default current window; used shorter current window.")
+
+    feat_drift = compute_feature_drift(
+        feature_history_df=fh,
+        baseline_window=(pd.Timestamp(baseline_start), pd.Timestamp(baseline_end)),
+        current_window=(pd.Timestamp(current_start), pd.Timestamp(current_end)),
+    )
+    sig_drift = compute_signal_instability(
+        regime_df=regime_df,
+        risk_df=risk_df,
+        quality_history_df=None,
+        feature_history_df=fh,
+    )
+    drift_df = pd.concat([feat_drift, sig_drift], axis=0, ignore_index=True)
+    save_parquet_atomic(drift_df, drift_signals_path)
+
+    coverage_stats = {
+        "prices_rows": int(len(prices_df)),
+        "feature_history_rows": int(len(fh)),
+        "treasury_exists": bool(treasury_df is not None and not treasury_df.empty),
+        "expected_min_price_rows": 50000,
+        "missing_counts": {c: int(fh[c].isna().sum()) for c in fh.columns if c not in {"Date", "Ticker"}},
+    }
+    alerts_df = generate_alerts(
+        drift_df=drift_df,
+        regime_df=regime_df if regime_df is not None else pd.DataFrame(),
+        risk_df=risk_df if risk_df is not None else pd.DataFrame(),
+        coverage_stats=coverage_stats,
+    )
+    save_parquet_atomic(alerts_df, alert_log_path)
+
+    drift_report = build_drift_report(
+        drift_df=drift_df,
+        baseline_window=(pd.Timestamp(baseline_start), pd.Timestamp(baseline_end)),
+        current_window=(pd.Timestamp(current_start), pd.Timestamp(current_end)),
+        coverage_stats=coverage_stats,
+        warnings=warnings,
+    )
+    write_json_report(drift_report, drift_report_path)
+    mon_health = build_monitoring_health_report(
+        drift_df=drift_df,
+        alerts_df=alerts_df,
+        coverage_stats=coverage_stats,
+        runtime_notes=["Monitoring uses PSI baseline/current windows with fallback shortening when history is limited."],
+    )
+    write_json_report(mon_health, monitoring_health_path)
+
+    # update registry / model health
+    now = pd.Timestamp.utcnow().isoformat()
+    try:
+        import json
+
+        with open(model_registry_path, "r", encoding="utf-8") as f:
+            registry = json.load(f)
+    except Exception:
+        registry = {"generated_at": now, "models": []}
+    registry.setdefault("models", [])
+    registry["generated_at"] = now
+    registry["models"].append(
+        {
+            "model_name": "monitoring_layer",
+            "model_version": "1.0.0",
+            "feature_set_used": ["PSI feature drift", "regime/risk instability metrics", "rule-based alerts"],
+            "training_or_evaluation_window": "rolling baseline/current windows",
+            "timestamp": now,
+            "evaluation_summary": {
+                "drift_rows": int(len(drift_df)),
+                "alerts_rows": int(len(alerts_df)),
+            },
+        }
+    )
+    write_json_report(registry, model_registry_path)
+
+    try:
+        import json
+
+        with open(model_health_path, "r", encoding="utf-8") as f:
+            health = json.load(f)
+    except Exception:
+        health = {"generated_at": now}
+    health["generated_at"] = now
+    health["monitoring_summary"] = {
+        "drift_signals_rows": int(len(drift_df)),
+        "alerts_rows": int(len(alerts_df)),
+        "worst_drift_level": "Severe" if (drift_df["DriftLevel"] == "Severe").any() else ("Drift" if (drift_df["DriftLevel"] == "Drift").any() else "Stable"),
+    }
+    write_json_report(health, model_health_path)
+
+    return MonitoringPipelineRunResult(
+        drift_signals=drift_df,
+        alerts=alerts_df,
+        wrote_artifacts=True,
+        reason="monitoring artifacts updated",
     )
