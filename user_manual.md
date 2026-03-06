@@ -495,6 +495,9 @@ If a feature ends with `_stability`, that suffix is removed before lookup.
 `EvidencePointsJSON` is parsed into key-value rows:
 - `Indicator`
 - `Value`
+Formatting behavior in UI:
+- Indicator names ending in `_flag` are shown as `True/False`.
+- Trend/volatility style indicators (for example `BenchmarkTrend_63d`, `BenchmarkVol_63d`) are shown in percent format where applicable.
 
 4. **Risk Indicator Time Series Build**
 For selected indicator and lookback window:
@@ -511,7 +514,7 @@ Displays:
 - `FeatureAsOfDate`
 - Top positive and negative driver text
 - Feature contribution table (signed contribution)
-- Evidence Card (raw values for top features)
+- Evidence Card (top-feature raw values with human-readable formatting; percent-style fields shown as `%`)
 
 Interpretation:
 - Positive signed contribution supports the score.

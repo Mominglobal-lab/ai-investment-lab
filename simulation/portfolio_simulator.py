@@ -150,7 +150,7 @@ def _compute_summary_metrics(
     max_drawdown = float(drawdown.min())
     worst_day = float(portfolio_returns.min())
 
-    monthly = (1.0 + portfolio_returns).resample("M").prod() - 1.0
+    monthly = (1.0 + portfolio_returns).resample("ME").prod() - 1.0
     worst_month = float(monthly.min()) if not monthly.empty else float("nan")
 
     var95 = float(np.quantile(portfolio_returns.values, 0.05))

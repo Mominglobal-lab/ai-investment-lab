@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 import sys
@@ -476,6 +476,68 @@ def _load_fundamentals_union() -> pd.DataFrame:
     return out
 
 
+def _load_explainability_feature_union() -> pd.DataFrame:
+    paths = [
+        "data/fundamentals_cache.parquet",
+        "data/fundamentals_cache_sp500.parquet",
+        "data/fundamentals_cache_nasdaq100.parquet",
+    ]
+    fund_frames: list[pd.DataFrame] = []
+    wanted_fund_cols = [
+        "Ticker",
+        "ROE",
+        "EBITDA_Margin",
+        "Revenue_Growth_YoY_Pct",
+        "Earnings_Growth_Pct",
+        "FreeCashFlow_Margin",
+        "MarketCap",
+    ]
+    for p in paths:
+        df, _err = read_parquet_safe(p)
+        if df is None or df.empty or "Ticker" not in df.columns:
+            continue
+        keep = [c for c in wanted_fund_cols if c in df.columns]
+        if not keep:
+            continue
+        f = df[keep].copy()
+        f["Ticker"] = f["Ticker"].astype(str).str.upper().str.strip()
+        for c in [x for x in keep if x != "Ticker"]:
+            f[c] = pd.to_numeric(f[c], errors="coerce")
+        fund_frames.append(f)
+
+    fund_df = pd.concat(fund_frames, axis=0, ignore_index=True) if fund_frames else pd.DataFrame(columns=["Ticker"])
+    if not fund_df.empty:
+        fund_df = fund_df.dropna(subset=["Ticker"]).drop_duplicates(subset=["Ticker"], keep="last")
+
+    px_df, _perr = read_parquet_safe(PRICES_CACHE_PATH)
+    if px_df is None or px_df.empty or not {"Ticker", "Date", "AdjClose"}.issubset(set(px_df.columns)):
+        return fund_df
+
+    px = px_df.copy()
+    px["Ticker"] = px["Ticker"].astype(str).str.upper().str.strip()
+    px["Date"] = pd.to_datetime(px["Date"], errors="coerce")
+    px["AdjClose"] = pd.to_numeric(px["AdjClose"], errors="coerce")
+    px = px.dropna(subset=["Ticker", "Date", "AdjClose"]).sort_values(["Ticker", "Date"])
+
+    rows: list[dict[str, object]] = []
+    for ticker, g in px.groupby("Ticker"):
+        s = g.set_index("Date")["AdjClose"].sort_index()
+        r1 = s.pct_change()
+        vol_63d = float(r1.rolling(63).std().iloc[-1] * (252.0 ** 0.5)) if len(r1) > 63 else float("nan")
+        dd_252d = float("nan")
+        if len(s) >= 30:
+            roll_max = s.rolling(252, min_periods=30).max()
+            dd = (s / roll_max) - 1.0
+            if not dd.empty:
+                dd_252d = float(dd.iloc[-1])
+        rows.append({"Ticker": ticker, "Volatility_63D": vol_63d, "Drawdown_252D": dd_252d})
+
+    price_feat_df = pd.DataFrame(rows)
+    if fund_df.empty:
+        return price_feat_df
+    return fund_df.merge(price_feat_df, on="Ticker", how="outer")
+
+
 def _parse_ticker_input(text: str) -> list[str]:
     raw = [x.strip().upper() for x in str(text or "").split(",")]
     seen: set[str] = set()
@@ -573,9 +635,9 @@ def _render_styled_table(df: pd.DataFrame) -> None:
     if numeric_cols:
         show[numeric_cols] = show[numeric_cols].round(2)
     try:
-        st.dataframe(show, use_container_width=True, hide_index=True)
+        st.dataframe(show, width="stretch", hide_index=True)
     except TypeError:
-        st.dataframe(show, use_container_width=True)
+        st.dataframe(show, width="stretch")
 
 
 def _render_sortable_centered_table(df: pd.DataFrame, center_cols: list[str]) -> None:
@@ -624,14 +686,14 @@ def _render_sortable_centered_table(df: pd.DataFrame, center_cols: list[str]) ->
     if valid_center_cols:
         styled = show.style.set_properties(subset=valid_center_cols, **{"text-align": "center"})
         try:
-            st.dataframe(styled, use_container_width=True, hide_index=True)
+            st.dataframe(styled, width="stretch", hide_index=True)
         except TypeError:
-            st.dataframe(styled, use_container_width=True)
+            st.dataframe(styled, width="stretch")
     else:
         try:
-            st.dataframe(show, use_container_width=True, hide_index=True)
+            st.dataframe(show, width="stretch", hide_index=True)
         except TypeError:
-            st.dataframe(show, use_container_width=True)
+            st.dataframe(show, width="stretch")
 
 
 def _render_sortable_all_but_first_table(df: pd.DataFrame) -> None:
@@ -645,31 +707,66 @@ def _render_explainability_table(df: pd.DataFrame, *, center_last_n: int = 1) ->
     cols = list(show.columns)
     n = max(1, int(center_last_n))
     centered_cols = set(cols[-min(n, len(cols)) :]) if cols else set()
-    numeric_cols = show.select_dtypes(include=["number"]).columns.tolist()
+    numeric_cols: set[str] = set()
+    percent_cols: set[str] = set()
+    flag_cols: set[str] = set()
+    percent_name_overrides = {
+        "benchmarktrend_63d",
+        "benchmarkvol_63d",
+        "volatility_63d",
+        "drawdown_252d",
+    }
+    for col in cols:
+        lname = str(col).lower()
+        raw = show[col]
+        if lname.endswith("_flag") or "flag" in lname:
+            flag_cols.add(col)
+            continue
+        if str(raw.dtype).lower() == "bool":
+            flag_cols.add(col)
+            continue
+        raw = show[col]
+        ser_num = pd.to_numeric(raw, errors="coerce")
+        non_null = int(raw.notna().sum())
+        if non_null == 0:
+            continue
+        # Columns that are effectively binary flags should be shown as True/False.
+        uniq_vals = set(pd.Series(raw).dropna().astype(str).str.strip().str.lower().unique().tolist())
+        if uniq_vals and uniq_vals.issubset({"0", "1", "true", "false"}):
+            flag_cols.add(col)
+            continue
+        numeric_ratio = float(ser_num.notna().sum()) / float(non_null)
+        if numeric_ratio >= 0.95:
+            numeric_cols.add(col)
+            if any(token in lname for token in ["pct", "percent", "prob", "confidence", "contribution"]) or lname in percent_name_overrides:
+                percent_cols.add(col)
 
     if AgGrid is not None and GridOptionsBuilder is not None and JsCode is not None:
         gb = GridOptionsBuilder.from_dataframe(show)
-        gb.configure_default_column(sortable=True, resizable=True)
+        gb.configure_default_column(sortable=True, resizable=True, flex=1, minWidth=140)
 
         for col in cols:
             cfg: dict = {}
             if col in centered_cols:
                 cfg["cellStyle"] = {"textAlign": "center"}
                 cfg["headerClass"] = "xpl-header-center"
-            if col in numeric_cols:
-                lname = str(col).lower()
-                is_percent_like = any(token in lname for token in ["pct", "percent", "prob", "confidence", "contribution"])
-                if is_percent_like:
+            if col in flag_cols:
+                cfg["valueFormatter"] = JsCode(
+                    "function(params){ if(params.value==null){return '';} if(params.value===true||params.value===1||params.value==='1'||String(params.value).toLowerCase()==='true'){return 'True';} return 'False'; }"
+                )
+            elif col in numeric_cols:
+                if col in percent_cols:
                     cfg["valueFormatter"] = JsCode(
-                        "function(params){ if(params.value==null){return '';} return (Number(params.value)*100).toFixed(2) + '%'; }"
+                        "function(params){ if(params.value==null){return '';} const v=Number(params.value); if(!Number.isFinite(v)){return '';} return (v*100).toFixed(2) + '%'; }"
                     )
                 else:
                     cfg["valueFormatter"] = JsCode(
-                        "function(params){ if(params.value==null){return '';} return Number(params.value).toFixed(2); }"
+                        "function(params){ if(params.value==null){return '';} const v=Number(params.value); if(!Number.isFinite(v)){return '';} const a=Math.abs(v); if(a>0 && a<0.1){return v.toFixed(4);} return v.toFixed(2); }"
                     )
             gb.configure_column(col, **cfg)
 
         grid_options = gb.build()
+        grid_options["suppressHorizontalScroll"] = False
         row_h = 36
         header_h = 40
         grid_options["rowHeight"] = row_h
@@ -682,6 +779,7 @@ def _render_explainability_table(df: pd.DataFrame, *, center_last_n: int = 1) ->
             fit_columns_on_grid_load=True,
             theme="streamlit",
             height=grid_height,
+            width="100%",
             custom_css={
                 ".ag-header-cell.xpl-header-center .ag-header-cell-label": {
                     "justify-content": "center"
@@ -691,18 +789,89 @@ def _render_explainability_table(df: pd.DataFrame, *, center_last_n: int = 1) ->
         return
 
     display_df = show.copy()
+    for col in flag_cols:
+        display_df[col] = (
+            pd.Series(show[col])
+            .map(lambda v: "" if pd.isna(v) else ("True" if str(v).strip().lower() in {"1", "true"} else "False"))
+        )
     for col in numeric_cols:
-        lname = str(col).lower()
-        is_percent_like = any(token in lname for token in ["pct", "percent", "prob", "confidence", "contribution"])
+        if col in flag_cols:
+            continue
         ser = pd.to_numeric(show[col], errors="coerce")
-        if is_percent_like:
+        if col in percent_cols:
             display_df[col] = ser.map(lambda v: "" if pd.isna(v) else f"{float(v) * 100.0:.2f}%")
         else:
-            display_df[col] = ser.map(lambda v: "" if pd.isna(v) else f"{float(v):.2f}")
+            display_df[col] = ser.map(
+                lambda v: ""
+                if pd.isna(v)
+                else (f"{float(v):.4f}" if (abs(float(v)) > 0 and abs(float(v)) < 0.1) else f"{float(v):.2f}")
+            )
     try:
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        st.dataframe(display_df, width="stretch", hide_index=True)
     except TypeError:
-        st.dataframe(display_df, use_container_width=True)
+        st.dataframe(display_df, width="stretch")
+
+
+def _format_evidence_points_table(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty or not {"Indicator", "Value"}.issubset(set(df.columns)):
+        return df
+    out = df.copy()
+    pct_indicators = {"benchmarktrend_63d", "benchmarkvol_63d", "volatility_63d", "drawdown_252d"}
+    values: list[object] = []
+    for _, r in out.iterrows():
+        indicator = str(r.get("Indicator", "")).strip()
+        v = r.get("Value")
+        il = indicator.lower()
+        if il.endswith("_flag") or "flag" in il:
+            if pd.isna(v):
+                values.append("")
+            else:
+                s = str(v).strip().lower()
+                values.append("True" if s in {"1", "true"} else "False")
+            continue
+        vn = pd.to_numeric(pd.Series([v]), errors="coerce").iloc[0]
+        if pd.isna(vn):
+            values.append(v)
+            continue
+        if il in pct_indicators:
+            values.append(f"{float(vn) * 100.0:.2f}%")
+        elif abs(float(vn)) > 0 and abs(float(vn)) < 0.1:
+            values.append(f"{float(vn):.4f}")
+        else:
+            values.append(f"{float(vn):.2f}")
+    out["Value"] = values
+    return out
+
+
+def _format_evidence_card_table(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty or not {"Feature", "RawValue"}.issubset(set(df.columns)):
+        return df
+    out = df.copy()
+    percent_features = {
+        "ebitda_margin",
+        "roe",
+        "revenue_growth_yoy_pct",
+        "earnings_growth_pct",
+        "freecashflow_margin",
+        "volatility_63d",
+        "drawdown_252d",
+    }
+    vals: list[object] = []
+    for _, r in out.iterrows():
+        feat = str(r.get("Feature", "")).replace("_stability", "").strip().lower()
+        v = r.get("RawValue")
+        vn = pd.to_numeric(pd.Series([v]), errors="coerce").iloc[0]
+        if pd.isna(vn):
+            vals.append("" if pd.isna(v) else v)
+            continue
+        if feat in percent_features:
+            vals.append(f"{float(vn) * 100.0:.2f}%")
+        elif abs(float(vn)) > 0 and abs(float(vn)) < 0.1:
+            vals.append(f"{float(vn):.4f}")
+        else:
+            vals.append(f"{float(vn):.2f}")
+    out["RawValue"] = vals
+    return out
 
 
 def _update_stock_cache(cache_path: str, health_report_path: str, universe: str, include_metadata: bool) -> StockUpdateResult:
@@ -764,7 +933,7 @@ def _show_stock_tab() -> None:
         include_metadata = st.checkbox("Enrich metadata (slower)", value=False, key="stock_enrich")
     with right:
         st.caption(" ")
-        force_refresh = st.button("Refresh Stock Data", use_container_width=True, key="stock_refresh")
+        force_refresh = st.button("Refresh Stock Data", width="stretch", key="stock_refresh")
 
     cache_path, health_report_path = _stock_paths(universe)
     status = get_cache_status(cache_path, MAX_AGE_DAYS, required_columns=SCHEMA_COLUMNS)
@@ -855,7 +1024,7 @@ def _show_stock_tab() -> None:
             st.session_state[k] = v
 
     with f4:
-        st.button("Reset Filters", use_container_width=True, key="stock_reset", on_click=_reset_stock_filters)
+        st.button("Reset Filters", width="stretch", key="stock_reset", on_click=_reset_stock_filters)
 
     with st.expander("Advanced Screening Filters", expanded=False):
         s1, s2, s3, s4 = st.columns(4)
@@ -1050,7 +1219,7 @@ def _show_fixed_income_tab() -> None:
         )
     with right:
         st.caption(" ")
-        force_refresh = st.button("Refresh Fixed-Income Data", use_container_width=True, key="fi_refresh")
+        force_refresh = st.button("Refresh Fixed-Income Data", width="stretch", key="fi_refresh")
 
     cache_path, health_report_path = _fi_paths(universe)
     status = get_cache_status(cache_path, MAX_AGE_DAYS, required_columns=FI_SCHEMA_COLUMNS)
@@ -1164,11 +1333,11 @@ def _show_portfolio_simulator_tab() -> None:
     with title_col:
         st.markdown("## Portfolio Decision Simulator")
     with act1:
-        refresh_clicked = st.button("Refresh Data", key="sim_refresh_data_btn", use_container_width=True)
+        refresh_clicked = st.button("Refresh Data", key="sim_refresh_data_btn", width="stretch")
     with act2:
-        run_clicked = st.button("Run Simulation", key="sim_run_btn", use_container_width=True)
+        run_clicked = st.button("Run Simulation", key="sim_run_btn", width="stretch")
     with act3:
-        export_clicked = st.button("Export Decision Brief", key="sim_export_brief", use_container_width=True)
+        export_clicked = st.button("Export Decision Brief", key="sim_export_brief", width="stretch")
 
     price_status = get_cache_status(PRICES_CACHE_PATH, MAX_AGE_DAYS, required_columns=PRICE_SCHEMA_COLUMNS)
     if (not price_status.exists) or (not price_status.schema_ok):
@@ -1412,7 +1581,7 @@ def _show_portfolio_simulator_tab() -> None:
                 growth_chart = alt.layer(growth_lines, risk_line).resolve_scale(y="independent").properties(height=320).interactive()
             else:
                 growth_chart = growth_lines.properties(height=320).interactive()
-            st.altair_chart(growth_chart, use_container_width=True)
+            st.altair_chart(growth_chart, width="stretch")
         else:
             st.caption("No growth data available.")
     with c2:
@@ -1440,7 +1609,7 @@ def _show_portfolio_simulator_tab() -> None:
                 .properties(height=320)
                 .interactive()
             )
-            st.altair_chart(draw_chart, use_container_width=True)
+            st.altair_chart(draw_chart, width="stretch")
         else:
             st.caption("No drawdown data available.")
 
@@ -1491,7 +1660,7 @@ def _show_decision_intelligence_tab() -> None:
     with title_col:
         st.markdown("## Decision Intelligence")
     with action_col:
-        build_models_clicked = st.button("Build Model Artifacts", key="di_build_models_btn", use_container_width=True)
+        build_models_clicked = st.button("Build Model Artifacts", key="di_build_models_btn", width="stretch")
 
     if build_models_clicked:
         with st.spinner("Building model artifacts..."):
@@ -1573,7 +1742,7 @@ def _show_decision_intelligence_tab() -> None:
             .configure_view(strokeOpacity=0)
             .interactive()
         )
-        st.altair_chart(chart, use_container_width=True)
+        st.altair_chart(chart, width="stretch")
 
     if risk_df is not None and not risk_df.empty and {"Date", "RiskScore", "RiskLevel"}.issubset(set(risk_df.columns)):
         st.markdown("#### Systemic Risk Timeline")
@@ -1601,7 +1770,7 @@ def _show_decision_intelligence_tab() -> None:
             .configure_view(strokeOpacity=0)
             .interactive()
         )
-        st.altair_chart(risk_chart, use_container_width=True)
+        st.altair_chart(risk_chart, width="stretch")
         st.markdown("#### Recent Risk Signals")
         _render_sortable_centered_table(ktmp.tail(30), ["RiskScore", "RiskLevel", "RiskFlags"])
 
@@ -1693,7 +1862,7 @@ def _show_explainability_tab() -> None:
         build_explain_clicked = st.button(
             "Build Explainability Artifacts",
             key="xpl_build_artifacts_btn",
-            use_container_width=True,
+            width="stretch",
         )
 
     if build_explain_clicked:
@@ -1719,7 +1888,7 @@ def _show_explainability_tab() -> None:
     revbase, _rb = read_parquet_safe(REGIME_CACHE_PATH)
     kevid, _ke = read_parquet_safe(RISK_EVIDENCE_PATH)
     kbase, _kb = read_parquet_safe(RISK_CACHE_PATH)
-    fdf = _load_fundamentals_union()
+    fdf = _load_explainability_feature_union()
 
     # Section A: Entity Explainability
     st.markdown("### A. Entity Explainability")
@@ -1766,7 +1935,7 @@ def _show_explainability_tab() -> None:
                         val = fm.loc[t].get(base_feat) if base_feat in fm.columns else None
                         raw_vals.append({"Feature": feat, "RawValue": val})
                     st.markdown("#### Evidence Card")
-                    _render_explainability_table(pd.DataFrame(raw_vals))
+                    _render_explainability_table(_format_evidence_card_table(pd.DataFrame(raw_vals)))
 
     # Section B: Regime Evidence
     st.markdown("### B. Operating Environment Evidence")
@@ -1797,7 +1966,7 @@ def _show_explainability_tab() -> None:
             evmap = {}
         if evmap:
             edt = pd.DataFrame([{"Indicator": k, "Value": v} for k, v in evmap.items()])
-            _render_explainability_table(edt)
+            _render_explainability_table(_format_evidence_points_table(edt))
 
     # Section C: Systemic Risk Evidence
     st.markdown("### C. Systemic Risk Evidence")
@@ -1831,7 +2000,7 @@ def _show_explainability_tab() -> None:
             evmap = {}
         if evmap:
             edt = pd.DataFrame([{"Indicator": k2, "Value": v2} for k2, v2 in evmap.items()])
-            _render_explainability_table(edt)
+            _render_explainability_table(_format_evidence_points_table(edt))
 
         ktail = k.tail(int(lookback_days)).copy()
         if "RiskScore" in ktail.columns:
@@ -1860,7 +2029,7 @@ def _show_uncertainty_tab() -> None:
         build_uncertainty_clicked = st.button(
             "Build Uncertainty Artifacts",
             key="unc_build_artifacts_btn",
-            use_container_width=True,
+            width="stretch",
         )
 
     if build_uncertainty_clicked:
@@ -1996,7 +2165,7 @@ def _show_uncertainty_tab() -> None:
                     y="RiskP10:Q",
                     y2="RiskP90:Q",
                 )
-                st.altair_chart((band + line).properties(height=280), use_container_width=True)
+                st.altair_chart((band + line).properties(height=280), width="stretch")
         else:
             st.warning("Uncertainty cache missing. Showing only point estimate.")
             st.caption(f"RiskLevel: {row.get('RiskLevel', 'Unknown')}")
@@ -2010,7 +2179,7 @@ def _show_monitoring_tab() -> None:
         build_monitoring_clicked = st.button(
             "Build Monitoring Artifacts",
             key="mon_build_artifacts_btn",
-            use_container_width=True,
+            width="stretch",
         )
 
     if build_monitoring_clicked:
@@ -2309,3 +2478,4 @@ with un_tab:
     _show_uncertainty_tab()
 with mon_tab:
     _show_monitoring_tab()
+
