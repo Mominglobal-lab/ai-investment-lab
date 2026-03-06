@@ -710,6 +710,10 @@ This tab performs:
 #### Main Action
 - **Build Monitoring Artifacts**: runs monitoring pipeline (and model pipeline first if needed).
 
+#### Global Date Control
+- **Date range**: single top-level control (`Last 30D`, `Last 60D`, `Last 90D`, `Last 180D`, `All`) applied across the tab’s date-based views.
+- There is no separate custom window picker now; the preset is the active filter source.
+
 #### Section B: Active Alerts
 - **Select alert**: choose one recent alert to inspect description/evidence/action.
 
@@ -733,14 +737,14 @@ This tab performs:
 - `Critical`, `Warning`, `Info` counts are computed from `alert_log`.
 
 4. **Recent Alert Window**
-- Uses last 30 days of alerts by date when available.
-- If none in window, falls back to latest 30 alerts.
+- Alerts are filtered by the selected global **Date range**.
+- Display uses latest rows within that filtered set.
 
 5. **Drift Dashboard Sorting**
 \[
 \text{Sort by DriftScore descending}
 \]
-after applying selected level/type filters.
+after applying selected level/type filters and global date range.
 
 6. **Regime Flip Rate (60d)**
 \[
@@ -767,15 +771,15 @@ Displays:
 
 #### B. Active Alerts
 Displays:
-- Recent alerts table (severity/type/title/date)
+- Date-range filtered alerts table (severity/type/title/date)
 - Selected alert description
 - Parsed evidence JSON table (if present)
 - Suggested action text
 
 #### C. Drift Dashboard
 Displays:
-- Filtered/sorted drift table
-- Time-series line of `DriftScore` for selected metric
+- Date-range filtered/sorted drift table
+- Time-series line of `DriftScore` for selected metric, constrained to selected date range on x-axis
 
 #### D. Signal Stability
 Displays:
@@ -784,6 +788,8 @@ Displays:
 - `RiskScore Volatility (60d)`
 - Risk-level change count
 - Quality instability proxy metric (if available)
+
+Note: these are computed from data within the global date range, then evaluated on trailing windows (for example, 60d where applicable).
 
 #### Monitoring Reports (optional)
 If JSON reports exist, displays:
@@ -794,11 +800,16 @@ If JSON reports exist, displays:
 
 ### 7. Data Sources and Fallback Behavior
 - Core dependency: `drift_signals_cache.parquet` (required for tab rendering)
+- Trend history dependency: `drift_signals_history.parquet` (used for Drift metric trend time series)
 - Optional:
   - `alert_log.parquet`
   - `drift_report.json`
   - `monitoring_health_report.json`
 - If optional files are missing, related sections show availability captions and continue.
+
+History behavior:
+- Snapshot drift file is still written each run.
+- History file is appended/deduped and backfilled on sparse history so trend charts show multi-date lines.
 
 ### 8. Practical Interpretation Guidance
 - Prioritize investigation when **Feature Drift = Severe** or **Signal Stability = Unstable**.

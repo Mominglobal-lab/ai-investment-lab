@@ -881,6 +881,7 @@ def run_monitoring_pipeline(
     regime_path: str = "data/regime_cache.parquet",
     risk_path: str = "data/risk_signals_cache.parquet",
     drift_signals_path: str = "data/drift_signals_cache.parquet",
+    drift_signals_history_path: str = "data/drift_signals_history.parquet",
     drift_report_path: str = "data/drift_report.json",
     alert_log_path: str = "data/alert_log.parquet",
     monitoring_health_path: str = "data/monitoring_health_report.json",
@@ -928,6 +929,66 @@ def run_monitoring_pipeline(
     )
     drift_df = pd.concat([feat_drift, sig_drift], axis=0, ignore_index=True)
     save_parquet_atomic(drift_df, drift_signals_path)
+    # Keep a longitudinal history for trend charts while preserving snapshot behavior.
+    hist_prev, _he = read_parquet_safe(drift_signals_history_path)
+
+    def _bootstrap_feature_history_rows() -> pd.DataFrame:
+        hist_rows: list[pd.DataFrame] = []
+        try:
+            all_dates = sorted(pd.to_datetime(fh["Date"], errors="coerce").dropna().unique().tolist())
+            eval_dates = all_dates[-90:] if len(all_dates) > 90 else all_dates
+            fh_min = pd.to_datetime(fh["Date"], errors="coerce").dropna().min()
+            for d in eval_dates:
+                d = pd.Timestamp(d)
+                current_end = d
+                current_start = d - pd.tseries.offsets.BDay(59)
+                baseline_end = d - pd.tseries.offsets.BDay(60)
+                baseline_start = baseline_end - pd.tseries.offsets.BDay(251)
+                if pd.notna(fh_min):
+                    if baseline_start < fh_min:
+                        baseline_start = fh_min
+                    if current_start < fh_min:
+                        current_start = fh_min
+                if baseline_end < baseline_start:
+                    continue
+                tmp = compute_feature_drift(
+                    feature_history_df=fh,
+                    baseline_window=(pd.Timestamp(baseline_start), pd.Timestamp(baseline_end)),
+                    current_window=(pd.Timestamp(current_start), pd.Timestamp(current_end)),
+                )
+                if tmp is not None and not tmp.empty:
+                    hist_rows.append(tmp)
+        except Exception:
+            hist_rows = []
+        return pd.concat(hist_rows, axis=0, ignore_index=True) if hist_rows else pd.DataFrame()
+
+    need_backfill = False
+    if hist_prev is None or hist_prev.empty:
+        need_backfill = True
+    else:
+        hp = hist_prev.copy()
+        hp["Date"] = pd.to_datetime(hp.get("Date"), errors="coerce")
+        feat_metrics = set(feat_drift["MetricName"].astype(str).tolist()) if not feat_drift.empty else set()
+        if feat_metrics and {"MetricName", "Date"}.issubset(set(hp.columns)):
+            c = hp[hp["MetricName"].astype(str).isin(feat_metrics)].groupby("MetricName")["Date"].nunique()
+            # Backfill if any feature metric has very sparse history.
+            need_backfill = (c.reindex(sorted(feat_metrics)).fillna(0) < 10).any()
+
+    base_hist = hist_prev.copy() if (hist_prev is not None and not hist_prev.empty) else pd.DataFrame()
+    if need_backfill:
+        boot = _bootstrap_feature_history_rows()
+        if not boot.empty:
+            base_hist = pd.concat([base_hist, boot], axis=0, ignore_index=True)
+
+    hist = pd.concat([base_hist, drift_df], axis=0, ignore_index=True)
+    if "Date" in hist.columns:
+        hist["Date"] = pd.to_datetime(hist["Date"], errors="coerce")
+        hist = hist.dropna(subset=["Date"])
+    dedup_keys = [c for c in ["Date", "MetricName", "MetricType"] if c in hist.columns]
+    if dedup_keys:
+        hist = hist.drop_duplicates(subset=dedup_keys, keep="last")
+    hist = hist.sort_values("Date")
+    save_parquet_atomic(hist, drift_signals_history_path)
 
     coverage_stats = {
         "prices_rows": int(len(prices_df)),

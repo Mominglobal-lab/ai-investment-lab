@@ -58,6 +58,7 @@ QUALITY_UNCERTAINTY_PATH = "data/quality_uncertainty_cache.parquet"
 REGIME_PROB_PATH = "data/regime_probabilities_cache.parquet"
 RISK_UNCERTAINTY_PATH = "data/risk_uncertainty_cache.parquet"
 DRIFT_SIGNALS_PATH = "data/drift_signals_cache.parquet"
+DRIFT_SIGNALS_HISTORY_PATH = "data/drift_signals_history.parquet"
 DRIFT_REPORT_PATH = "data/drift_report.json"
 ALERT_LOG_PATH = "data/alert_log.parquet"
 MONITORING_HEALTH_PATH = "data/monitoring_health_report.json"
@@ -699,6 +700,12 @@ def _render_sortable_centered_table(df: pd.DataFrame, center_cols: list[str]) ->
 def _render_sortable_all_but_first_table(df: pd.DataFrame) -> None:
     cols = list(df.columns)
     center_cols = cols[1:] if len(cols) > 1 else []
+    _render_sortable_centered_table(df, center_cols)
+
+
+def _render_sortable_first_col_centered_table(df: pd.DataFrame) -> None:
+    cols = list(df.columns)
+    center_cols = cols[:1] if cols else []
     _render_sortable_centered_table(df, center_cols)
 
 
@@ -2199,6 +2206,7 @@ def _show_monitoring_tab() -> None:
     import json
 
     drift_df, _de = read_parquet_safe(DRIFT_SIGNALS_PATH)
+    drift_hist_df, _dh = read_parquet_safe(DRIFT_SIGNALS_HISTORY_PATH)
     alert_df, _ae = read_parquet_safe(ALERT_LOG_PATH)
     regime_df, _re = read_parquet_safe(REGIME_CACHE_PATH)
     risk_df, _rk = read_parquet_safe(RISK_CACHE_PATH)
@@ -2207,17 +2215,66 @@ def _show_monitoring_tab() -> None:
         st.warning("Monitoring artifacts missing. Run pipeline with run_monitoring=True.")
         return
 
+    def _filter_by_date(df: pd.DataFrame | None, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame | None:
+        if df is None or df.empty or "Date" not in df.columns:
+            return df
+        out = df.copy()
+        out["Date"] = pd.to_datetime(out["Date"], errors="coerce", utc=True).dt.tz_localize(None)
+        out = out.dropna(subset=["Date"])
+        return out[(out["Date"] >= start) & (out["Date"] <= end)].copy()
+
+    date_chunks: list[pd.Series] = []
+    for src in [drift_hist_df, drift_df, alert_df, regime_df, risk_df]:
+        if src is None or src.empty or "Date" not in src.columns:
+            continue
+        s = pd.to_datetime(src["Date"], errors="coerce", utc=True).dt.tz_localize(None).dropna()
+        if not s.empty:
+            date_chunks.append(s)
+
+    if date_chunks:
+        all_dates = pd.concat(date_chunks, axis=0)
+        min_date = pd.Timestamp(all_dates.min()).normalize()
+        max_date = pd.Timestamp(all_dates.max()).normalize()
+    else:
+        max_date = pd.Timestamp.utcnow().normalize()
+        min_date = max_date - pd.Timedelta(days=365)
+
+    mon_range = st.selectbox(
+        "Date range",
+        ["Last 30D", "Last 60D", "Last 90D", "Last 180D", "All"],
+        index=2,
+        key="mon_date_range_preset",
+    )
+    if mon_range == "All":
+        win_start = min_date
+        win_end = max_date
+    else:
+        days = int(mon_range.split()[1].replace("D", ""))
+        win_start = max(min_date, max_date - pd.Timedelta(days=days))
+        win_end = max_date
+    if win_start > win_end:
+        win_start, win_end = win_end, win_start
+    win_end = win_end + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+
+    drift_df_f = _filter_by_date(drift_df, win_start, win_end)
+    drift_hist_df_f = _filter_by_date(drift_hist_df, win_start, win_end)
+    alert_df_f = _filter_by_date(alert_df, win_start, win_end)
+    regime_df_f = _filter_by_date(regime_df, win_start, win_end)
+    risk_df_f = _filter_by_date(risk_df, win_start, win_end)
+
     # Section A: summary
     st.markdown("### A. Monitoring Summary")
     worst = "Stable"
-    if (drift_df["DriftLevel"] == "Severe").any():
+    src_summary = drift_df_f if (drift_df_f is not None and not drift_df_f.empty) else drift_df
+    if (src_summary["DriftLevel"] == "Severe").any():
         worst = "Severe"
-    elif (drift_df["DriftLevel"] == "Drift").any():
+    elif (src_summary["DriftLevel"] == "Drift").any():
         worst = "Drift"
-    signal_unstable = "Unstable" if ((drift_df["MetricType"] == "Signal") & (drift_df["DriftLevel"] != "Stable")).any() else "Stable"
-    crit = int(((alert_df is not None) and (not alert_df.empty) and (alert_df["Severity"] == "Critical").sum()) or 0)
-    warn = int(((alert_df is not None) and (not alert_df.empty) and (alert_df["Severity"] == "Warning").sum()) or 0)
-    info = int(((alert_df is not None) and (not alert_df.empty) and (alert_df["Severity"] == "Info").sum()) or 0)
+    signal_unstable = "Unstable" if ((src_summary["MetricType"] == "Signal") & (src_summary["DriftLevel"] != "Stable")).any() else "Stable"
+    src_alerts = alert_df_f if (alert_df_f is not None and not alert_df_f.empty) else alert_df
+    crit = int(((src_alerts is not None) and (not src_alerts.empty) and (src_alerts["Severity"] == "Critical").sum()) or 0)
+    warn = int(((src_alerts is not None) and (not src_alerts.empty) and (src_alerts["Severity"] == "Warning").sum()) or 0)
+    info = int(((src_alerts is not None) and (not src_alerts.empty) and (src_alerts["Severity"] == "Info").sum()) or 0)
 
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -2229,15 +2286,12 @@ def _show_monitoring_tab() -> None:
 
     # Section B: alerts
     st.markdown("### B. Active Alerts")
-    if alert_df is None or alert_df.empty:
+    if src_alerts is None or src_alerts.empty:
         st.caption("No alerts available.")
     else:
-        a = alert_df.copy()
+        a = src_alerts.copy()
         a["Date"] = pd.to_datetime(a["Date"], errors="coerce", utc=True).dt.tz_localize(None)
-        cutoff = pd.Timestamp.now(tz="UTC").tz_localize(None) - pd.Timedelta(days=30)
-        recent = a[a["Date"] >= cutoff].sort_values("Date", ascending=False)
-        if recent.empty:
-            recent = a.sort_values("Date", ascending=False).head(30)
+        recent = a.sort_values("Date", ascending=False).head(50)
         cols = [c for c in ["Severity", "AlertType", "Title", "Date"] if c in recent.columns]
         _render_sortable_all_but_first_table(recent[cols])
 
@@ -2267,7 +2321,7 @@ def _show_monitoring_tab() -> None:
         level_pick = st.selectbox("DriftLevel filter", options=levels, index=0, key="mon_level_filter")
     with c2:
         type_pick = st.selectbox("MetricType filter", options=types, index=0, key="mon_type_filter")
-    d = drift_df.copy()
+    d = src_summary.copy()
     if level_pick != "All":
         d = d[d["DriftLevel"] == level_pick]
     if type_pick != "All":
@@ -2275,20 +2329,34 @@ def _show_monitoring_tab() -> None:
     d = d.sort_values("DriftScore", ascending=False)
     _render_sortable_all_but_first_table(d)
 
-    if not drift_df.empty:
-        metric_names = sorted(drift_df["MetricName"].astype(str).unique().tolist())
+    trend_src = drift_hist_df_f if (drift_hist_df_f is not None and not drift_hist_df_f.empty) else src_summary
+    if trend_src is not None and not trend_src.empty:
+        metric_names = sorted(trend_src["MetricName"].astype(str).unique().tolist())
         sel_metric = st.selectbox("Drift metric trend", options=metric_names, index=0, key="mon_metric_trend")
-        trend = drift_df[drift_df["MetricName"] == sel_metric].copy()
+        trend = trend_src[trend_src["MetricName"] == sel_metric].copy()
         if not trend.empty:
             trend["Date"] = pd.to_datetime(trend["Date"], errors="coerce")
-            st.line_chart(trend.set_index("Date")[["DriftScore"]])
+            trend["DriftScore"] = pd.to_numeric(trend["DriftScore"], errors="coerce")
+            trend = trend.dropna(subset=["Date", "DriftScore"]).sort_values("Date")
+            if not trend.empty:
+                trend_chart = (
+                    alt.Chart(trend)
+                    .mark_line(color="#7ec8ff")
+                    .encode(
+                        x=alt.X("Date:T", scale=alt.Scale(domain=[win_start, win_end]), title=""),
+                        y=alt.Y("DriftScore:Q", title=""),
+                    )
+                    .properties(height=300)
+                    .interactive()
+                )
+                st.altair_chart(trend_chart, width="stretch")
 
     # Section D: signal stability
     st.markdown("### D. Signal Stability")
     c1, c2, c3 = st.columns(3)
     with c1:
-        if regime_df is not None and not regime_df.empty and "RegimeLabel" in regime_df.columns:
-            rr = regime_df.copy()
+        if regime_df_f is not None and not regime_df_f.empty and "RegimeLabel" in regime_df_f.columns:
+            rr = regime_df_f.copy()
             rr["Date"] = pd.to_datetime(rr["Date"], errors="coerce")
             rr = rr.dropna(subset=["Date"]).sort_values("Date").tail(60)
             flip = float((rr["RegimeLabel"] != rr["RegimeLabel"].shift(1)).mean()) if len(rr) > 1 else 0.0
@@ -2297,8 +2365,8 @@ def _show_monitoring_tab() -> None:
             if pd.notna(avg_conf):
                 st.caption(f"Avg confidence (60d): {avg_conf:.2f}")
     with c2:
-        if risk_df is not None and not risk_df.empty and "RiskScore" in risk_df.columns:
-            rk = risk_df.copy()
+        if risk_df_f is not None and not risk_df_f.empty and "RiskScore" in risk_df_f.columns:
+            rk = risk_df_f.copy()
             rk["Date"] = pd.to_datetime(rk["Date"], errors="coerce")
             rk["RiskScore"] = pd.to_numeric(rk["RiskScore"], errors="coerce")
             rk = rk.dropna(subset=["Date", "RiskScore"]).sort_values("Date").tail(60)
@@ -2307,7 +2375,7 @@ def _show_monitoring_tab() -> None:
             st.metric("RiskScore Volatility (60d)", f"{vol:.2f}")
             st.caption(f"Risk level changes (60d): {chg}")
     with c3:
-        q_proxy = drift_df[drift_df["MetricName"] == "QualityProxyDrift"]
+        q_proxy = src_summary[src_summary["MetricName"] == "QualityProxyDrift"]
         if not q_proxy.empty:
             val = float(q_proxy["DriftScore"].iloc[-1])
             st.metric("Quality Instability Proxy", f"{val:.3f}")
@@ -2349,10 +2417,12 @@ def _show_monitoring_tab() -> None:
 
             if isinstance(top_features, list) and top_features:
                 st.markdown("Top Drifting Features")
-                _render_sortable_all_but_first_table(pd.DataFrame(top_features))
+                tf_df = _filter_by_date(pd.DataFrame(top_features), win_start, win_end)
+                _render_sortable_all_but_first_table(tf_df if tf_df is not None else pd.DataFrame(top_features))
             if isinstance(top_signals, list) and top_signals:
                 st.markdown("Top Drifting Signals")
-                _render_sortable_all_but_first_table(pd.DataFrame(top_signals))
+                ts_df = _filter_by_date(pd.DataFrame(top_signals), win_start, win_end)
+                _render_sortable_all_but_first_table(ts_df if ts_df is not None else pd.DataFrame(top_signals))
 
             coverage = dr.get("data_coverage_stats", {})
             if isinstance(coverage, dict) and coverage:
@@ -2361,7 +2431,7 @@ def _show_monitoring_tab() -> None:
                     k: v for k, v in coverage.items() if k != "missing_counts"
                 }
                 if cov_simple:
-                    _render_sortable_all_but_first_table(pd.DataFrame([cov_simple]))
+                    _render_sortable_first_col_centered_table(pd.DataFrame([cov_simple]))
                 missing_counts = coverage.get("missing_counts", {})
                 if isinstance(missing_counts, dict) and missing_counts:
                     miss_df = pd.DataFrame(
@@ -2380,7 +2450,8 @@ def _show_monitoring_tab() -> None:
             if summary:
                 st.caption(str(summary))
         elif isinstance(dr, list) and dr:
-            _render_sortable_all_but_first_table(pd.json_normalize(dr, sep="."))
+            dr_df = _filter_by_date(pd.json_normalize(dr, sep="."), win_start, win_end)
+            _render_sortable_all_but_first_table(dr_df if dr_df is not None else pd.json_normalize(dr, sep="."))
         else:
             st.caption("Drift report is empty.")
     except Exception:
@@ -2421,7 +2492,7 @@ def _show_monitoring_tab() -> None:
                     k: v for k, v in coverage.items() if k != "missing_counts"
                 }
                 if cov_simple:
-                    _render_sortable_all_but_first_table(pd.DataFrame([cov_simple]))
+                    _render_sortable_first_col_centered_table(pd.DataFrame([cov_simple]))
                 missing_counts = coverage.get("missing_counts", {})
                 if isinstance(missing_counts, dict) and missing_counts:
                     miss_df = pd.DataFrame(
@@ -2444,7 +2515,8 @@ def _show_monitoring_tab() -> None:
                 for n in notes:
                     st.caption(f"- {n}")
         elif isinstance(mh, list) and mh:
-            _render_sortable_all_but_first_table(pd.json_normalize(mh, sep="."))
+            mh_df = _filter_by_date(pd.json_normalize(mh, sep="."), win_start, win_end)
+            _render_sortable_all_but_first_table(mh_df if mh_df is not None else pd.json_normalize(mh, sep="."))
         else:
             st.caption("Monitoring health report is empty.")
     except Exception:
