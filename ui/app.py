@@ -7,6 +7,13 @@ from pathlib import Path
 import altair as alt
 import pandas as pd
 import streamlit as st
+try:
+    from st_aggrid import AgGrid, GridOptionsBuilder
+    from st_aggrid.shared import JsCode
+except Exception:
+    AgGrid = None
+    GridOptionsBuilder = None
+    JsCode = None
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -363,6 +370,7 @@ def _apply_premium_theme() -> None:
             font-weight: 900 !important;
             background: #edf3fb !important;
             border-bottom: 1px solid #b7c8dc !important;
+            text-align: left !important;
         }
 
         .ii-table-wrap tbody tr td,
@@ -568,6 +576,133 @@ def _render_styled_table(df: pd.DataFrame) -> None:
         st.dataframe(show, use_container_width=True, hide_index=True)
     except TypeError:
         st.dataframe(show, use_container_width=True)
+
+
+def _render_sortable_centered_table(df: pd.DataFrame, center_cols: list[str]) -> None:
+    show = df.copy()
+    numeric_cols = show.select_dtypes(include=["number"]).columns.tolist()
+    if numeric_cols:
+        show[numeric_cols] = show[numeric_cols].round(2)
+
+    valid_center_cols = [c for c in center_cols if c in show.columns]
+    if AgGrid is not None and GridOptionsBuilder is not None:
+        gb = GridOptionsBuilder.from_dataframe(show)
+        gb.configure_default_column(sortable=True, resizable=True, flex=1, minWidth=120)
+        for col in valid_center_cols:
+            gb.configure_column(
+                col,
+                cellStyle={"textAlign": "center"},
+                headerClass="di-header-center",
+                cellClass="di-cell-center",
+            )
+        grid_options = gb.build()
+        grid_options["suppressHorizontalScroll"] = False
+        row_h = 36
+        header_h = 40
+        grid_options["rowHeight"] = row_h
+        grid_options["headerHeight"] = header_h
+        grid_height = int(header_h + (max(1, len(show)) * row_h) + 2)
+        AgGrid(
+            show,
+            gridOptions=grid_options,
+            allow_unsafe_jscode=True,
+            fit_columns_on_grid_load=True,
+            theme="streamlit",
+            height=grid_height,
+            width="100%",
+            custom_css={
+                ".ag-header-cell.di-header-center .ag-header-cell-label": {
+                    "justify-content": "center"
+                },
+                ".ag-cell.di-cell-center .ag-cell-wrapper": {
+                    "justify-content": "center"
+                }
+            },
+        )
+        return
+
+    if valid_center_cols:
+        styled = show.style.set_properties(subset=valid_center_cols, **{"text-align": "center"})
+        try:
+            st.dataframe(styled, use_container_width=True, hide_index=True)
+        except TypeError:
+            st.dataframe(styled, use_container_width=True)
+    else:
+        try:
+            st.dataframe(show, use_container_width=True, hide_index=True)
+        except TypeError:
+            st.dataframe(show, use_container_width=True)
+
+
+def _render_sortable_all_but_first_table(df: pd.DataFrame) -> None:
+    cols = list(df.columns)
+    center_cols = cols[1:] if len(cols) > 1 else []
+    _render_sortable_centered_table(df, center_cols)
+
+
+def _render_explainability_table(df: pd.DataFrame, *, center_last_n: int = 1) -> None:
+    show = df.copy()
+    cols = list(show.columns)
+    n = max(1, int(center_last_n))
+    centered_cols = set(cols[-min(n, len(cols)) :]) if cols else set()
+    numeric_cols = show.select_dtypes(include=["number"]).columns.tolist()
+
+    if AgGrid is not None and GridOptionsBuilder is not None and JsCode is not None:
+        gb = GridOptionsBuilder.from_dataframe(show)
+        gb.configure_default_column(sortable=True, resizable=True)
+
+        for col in cols:
+            cfg: dict = {}
+            if col in centered_cols:
+                cfg["cellStyle"] = {"textAlign": "center"}
+                cfg["headerClass"] = "xpl-header-center"
+            if col in numeric_cols:
+                lname = str(col).lower()
+                is_percent_like = any(token in lname for token in ["pct", "percent", "prob", "confidence", "contribution"])
+                if is_percent_like:
+                    cfg["valueFormatter"] = JsCode(
+                        "function(params){ if(params.value==null){return '';} return (Number(params.value)*100).toFixed(2) + '%'; }"
+                    )
+                else:
+                    cfg["valueFormatter"] = JsCode(
+                        "function(params){ if(params.value==null){return '';} return Number(params.value).toFixed(2); }"
+                    )
+            gb.configure_column(col, **cfg)
+
+        grid_options = gb.build()
+        row_h = 36
+        header_h = 40
+        grid_options["rowHeight"] = row_h
+        grid_options["headerHeight"] = header_h
+        grid_height = int(header_h + (max(1, len(show)) * row_h) + 2)
+        AgGrid(
+            show,
+            gridOptions=grid_options,
+            allow_unsafe_jscode=True,
+            fit_columns_on_grid_load=True,
+            theme="streamlit",
+            height=grid_height,
+            custom_css={
+                ".ag-header-cell.xpl-header-center .ag-header-cell-label": {
+                    "justify-content": "center"
+                }
+            },
+        )
+        return
+
+    display_df = show.copy()
+    for col in numeric_cols:
+        lname = str(col).lower()
+        is_percent_like = any(token in lname for token in ["pct", "percent", "prob", "confidence", "contribution"])
+        ser = pd.to_numeric(show[col], errors="coerce")
+        if is_percent_like:
+            display_df[col] = ser.map(lambda v: "" if pd.isna(v) else f"{float(v) * 100.0:.2f}%")
+        else:
+            display_df[col] = ser.map(lambda v: "" if pd.isna(v) else f"{float(v):.2f}")
+    try:
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+    except TypeError:
+        st.dataframe(display_df, use_container_width=True)
 
 
 def _update_stock_cache(cache_path: str, health_report_path: str, universe: str, include_metadata: bool) -> StockUpdateResult:
@@ -862,7 +997,22 @@ def _show_stock_tab() -> None:
         ]
     ]
     st.write(f"Matches: {len(df_show):,}")
-    _render_styled_table(df_show)
+    _render_sortable_centered_table(
+        df_show,
+        [
+            "QualityScore",
+            "QualityTier",
+            "Close",
+            "MarketCap (B)",
+            "Revenue_Growth_YoY_Pct",
+            "Earnings_Growth_Pct",
+            "PE_Ratio",
+            "PEG_Ratio",
+            "Rule_of_40",
+            "EBITDA Margin (Pct)",
+            "ROE (Pct)",
+        ],
+    )
 
     ticker = st.selectbox("Ticker details", options=[""] + df["Ticker"].astype(str).tolist(), index=0, key="stock_detail_ticker")
     if ticker:
@@ -975,7 +1125,20 @@ def _show_fixed_income_tab() -> None:
         ]
     ]
     st.write(f"Matches: {len(show):,}")
-    _render_styled_table(show)
+    _render_sortable_centered_table(
+        show,
+        [
+            "Name",
+            "Universe",
+            "Type",
+            "Price",
+            "Yield_Pct",
+            "Duration_Years",
+            "Maturity_Bucket",
+            "Expense_Ratio_Pct",
+            "AUM (B)",
+        ],
+    )
 
     detail_symbol = st.selectbox("Instrument details", options=[""] + df["Symbol"].astype(str).tolist(), index=0, key="fi_detail")
     if detail_symbol:
@@ -1303,7 +1466,7 @@ def _show_portfolio_simulator_tab() -> None:
             val = raw
         rows.append({"Metric": metric, "Value": val})
     summary_df = pd.DataFrame(rows, columns=["Metric", "Value"])
-    _render_styled_table(summary_df)
+    _render_sortable_centered_table(summary_df, ["Value"])
 
     scenario = result.get("scenario_results")
     if scenario:
@@ -1320,7 +1483,7 @@ def _show_portfolio_simulator_tab() -> None:
             {"Statistic": "Probability of Loss (chance portfolio ends below starting capital)", "Value": f"{float(scenario.get('probability_of_loss') or 0.0) * 100:.2f}%"},
         ]
         mc_df = pd.DataFrame(mc_rows, columns=["Statistic", "Value"])
-        _render_styled_table(mc_df)
+        _render_sortable_centered_table(mc_df, ["Value"])
 
 
 def _show_decision_intelligence_tab() -> None:
@@ -1379,7 +1542,7 @@ def _show_decision_intelligence_tab() -> None:
             st.bar_chart(dist.set_index("Bucket"))
         st.markdown("#### Top Quality Entities")
         top_q = quality_df.sort_values("QualityScore", ascending=False).head(30)
-        _render_styled_table(top_q)
+        _render_sortable_centered_table(top_q, ["QualityScore", "QualityTier"])
 
     if regime_df is not None and not regime_df.empty and {"Date", "RegimeLabel", "ConfidenceScore"}.issubset(set(regime_df.columns)):
         st.markdown("#### Regime Timeline")
@@ -1440,7 +1603,7 @@ def _show_decision_intelligence_tab() -> None:
         )
         st.altair_chart(risk_chart, use_container_width=True)
         st.markdown("#### Recent Risk Signals")
-        _render_styled_table(ktmp.tail(30))
+        _render_sortable_centered_table(ktmp.tail(30), ["RiskScore", "RiskLevel", "RiskFlags"])
 
     st.markdown("#### Model Registry")
     try:
@@ -1470,7 +1633,7 @@ def _show_decision_intelligence_tab() -> None:
             show_cols = [c for c in preferred_cols if c in model_df.columns]
             if not show_cols:
                 show_cols = list(model_df.columns)
-            _render_styled_table(model_df[show_cols])
+            _render_sortable_centered_table(model_df[show_cols], ["model_version", "evaluation_summary.rows_scored"])
         else:
             st.caption("No model entries found in model registry.")
     except Exception:
@@ -1499,7 +1662,7 @@ def _show_decision_intelligence_tab() -> None:
                 st.metric("Stale", int((status_l == "stale").sum()))
             with c3:
                 st.metric("Other", int((~status_l.isin(["fresh", "stale"])).sum()))
-            _render_styled_table(fresh_df)
+            _render_sortable_centered_table(fresh_df, ["status"])
 
         coverage = health.get("input_cache_coverage", {})
         if isinstance(coverage, dict) and coverage:
@@ -1517,7 +1680,7 @@ def _show_decision_intelligence_tab() -> None:
                 cov_cols = [c for c in preferred_cov_cols if c in cov_df.columns]
                 if not cov_cols:
                     cov_cols = list(cov_df.columns)
-                _render_styled_table(cov_df[cov_cols])
+                _render_sortable_centered_table(cov_df[cov_cols], ["exists", "schema_ok"])
     except Exception:
         st.caption("`data/model_health_report.json` not available.")
 
@@ -1565,7 +1728,7 @@ def _show_explainability_tab() -> None:
         if qbase is None or qbase.empty:
             st.caption("No quality score data available.")
         else:
-            _render_styled_table(qbase.head(50))
+            _render_explainability_table(qbase.head(50))
     else:
         qexp = qexp.copy()
         qexp["Ticker"] = qexp["Ticker"].astype(str).str.upper().str.strip()
@@ -1592,7 +1755,7 @@ def _show_explainability_tab() -> None:
         if not cdf.empty:
             cdf["AbsContribution"] = cdf["SignedContribution"].abs()
             cdf = cdf.sort_values("AbsContribution", ascending=False).drop(columns=["AbsContribution"])
-            _render_styled_table(cdf)
+            _render_explainability_table(cdf)
             top_feats = cdf["Feature"].head(3).tolist()
             if not fdf.empty:
                 raw_vals = []
@@ -1603,7 +1766,7 @@ def _show_explainability_tab() -> None:
                         val = fm.loc[t].get(base_feat) if base_feat in fm.columns else None
                         raw_vals.append({"Feature": feat, "RawValue": val})
                     st.markdown("#### Evidence Card")
-                    _render_styled_table(pd.DataFrame(raw_vals))
+                    _render_explainability_table(pd.DataFrame(raw_vals))
 
     # Section B: Regime Evidence
     st.markdown("### B. Operating Environment Evidence")
@@ -1634,7 +1797,7 @@ def _show_explainability_tab() -> None:
             evmap = {}
         if evmap:
             edt = pd.DataFrame([{"Indicator": k, "Value": v} for k, v in evmap.items()])
-            _render_styled_table(edt)
+            _render_explainability_table(edt)
 
     # Section C: Systemic Risk Evidence
     st.markdown("### C. Systemic Risk Evidence")
@@ -1668,7 +1831,7 @@ def _show_explainability_tab() -> None:
             evmap = {}
         if evmap:
             edt = pd.DataFrame([{"Indicator": k2, "Value": v2} for k2, v2 in evmap.items()])
-            _render_styled_table(edt)
+            _render_explainability_table(edt)
 
         ktail = k.tail(int(lookback_days)).copy()
         if "RiskScore" in ktail.columns:
@@ -1789,7 +1952,7 @@ def _show_uncertainty_tab() -> None:
                     {"Regime": "Risk Off", "Probability": float(row["P_RiskOff"])},
                 ]
             )
-            _render_styled_table(prob_df)
+            _render_sortable_centered_table(prob_df, ["Probability"])
             st.bar_chart(prob_df.set_index("Regime"))
             if "RegimeStability_20d" in row:
                 st.caption(f"RegimeStability_20d: {float(row['RegimeStability_20d']):.2f}")
@@ -1907,7 +2070,7 @@ def _show_monitoring_tab() -> None:
         if recent.empty:
             recent = a.sort_values("Date", ascending=False).head(30)
         cols = [c for c in ["Severity", "AlertType", "Title", "Date"] if c in recent.columns]
-        _render_styled_table(recent[cols])
+        _render_sortable_all_but_first_table(recent[cols])
 
         choices = [f"{r.Severity} | {r.AlertType} | {r.Date:%Y-%m-%d}" for r in recent.itertuples()]
         idx = st.selectbox("Select alert", options=list(range(len(choices))), format_func=lambda i: choices[i], key="mon_alert_pick")
@@ -1917,9 +2080,9 @@ def _show_monitoring_tab() -> None:
             ev = json.loads(str(row.get("EvidenceJSON", "{}")))
             if isinstance(ev, dict) and ev:
                 ev_df = pd.json_normalize(ev, sep=".")
-                _render_styled_table(ev_df)
+                _render_sortable_all_but_first_table(ev_df)
             elif isinstance(ev, list) and ev:
-                _render_styled_table(pd.json_normalize(ev, sep="."))
+                _render_sortable_all_but_first_table(pd.json_normalize(ev, sep="."))
             else:
                 st.caption("No structured evidence details available.")
         except Exception:
@@ -1941,7 +2104,7 @@ def _show_monitoring_tab() -> None:
     if type_pick != "All":
         d = d[d["MetricType"] == type_pick]
     d = d.sort_values("DriftScore", ascending=False)
-    _render_styled_table(d)
+    _render_sortable_all_but_first_table(d)
 
     if not drift_df.empty:
         metric_names = sorted(drift_df["MetricName"].astype(str).unique().tolist())
@@ -2013,14 +2176,14 @@ def _show_monitoring_tab() -> None:
             window_settings = dr.get("window_settings_used", {})
             if isinstance(window_settings, dict) and window_settings:
                 st.markdown("Window Settings")
-                _render_styled_table(pd.DataFrame([window_settings]))
+                _render_sortable_all_but_first_table(pd.DataFrame([window_settings]))
 
             if isinstance(top_features, list) and top_features:
                 st.markdown("Top Drifting Features")
-                _render_styled_table(pd.DataFrame(top_features))
+                _render_sortable_all_but_first_table(pd.DataFrame(top_features))
             if isinstance(top_signals, list) and top_signals:
                 st.markdown("Top Drifting Signals")
-                _render_styled_table(pd.DataFrame(top_signals))
+                _render_sortable_all_but_first_table(pd.DataFrame(top_signals))
 
             coverage = dr.get("data_coverage_stats", {})
             if isinstance(coverage, dict) and coverage:
@@ -2029,14 +2192,14 @@ def _show_monitoring_tab() -> None:
                     k: v for k, v in coverage.items() if k != "missing_counts"
                 }
                 if cov_simple:
-                    _render_styled_table(pd.DataFrame([cov_simple]))
+                    _render_sortable_all_but_first_table(pd.DataFrame([cov_simple]))
                 missing_counts = coverage.get("missing_counts", {})
                 if isinstance(missing_counts, dict) and missing_counts:
                     miss_df = pd.DataFrame(
                         [{"MetricName": k, "MissingCount": int(v)} for k, v in missing_counts.items()]
                     ).sort_values("MissingCount", ascending=False)
                     st.markdown("Missing Feature Counts")
-                    _render_styled_table(miss_df)
+                    _render_sortable_all_but_first_table(miss_df)
 
             notes = dr.get("warnings_and_fallbacks_used", [])
             if isinstance(notes, list) and notes:
@@ -2048,7 +2211,7 @@ def _show_monitoring_tab() -> None:
             if summary:
                 st.caption(str(summary))
         elif isinstance(dr, list) and dr:
-            _render_styled_table(pd.json_normalize(dr, sep="."))
+            _render_sortable_all_but_first_table(pd.json_normalize(dr, sep="."))
         else:
             st.caption("Drift report is empty.")
     except Exception:
@@ -2080,7 +2243,7 @@ def _show_monitoring_tab() -> None:
                     [{"artifact": k, "status": str(v)} for k, v in freshness.items()]
                 )
                 st.markdown("Artifact Freshness")
-                _render_styled_table(fresh_df)
+                _render_sortable_all_but_first_table(fresh_df)
 
             coverage = mh.get("coverage", {})
             if isinstance(coverage, dict) and coverage:
@@ -2089,14 +2252,14 @@ def _show_monitoring_tab() -> None:
                     k: v for k, v in coverage.items() if k != "missing_counts"
                 }
                 if cov_simple:
-                    _render_styled_table(pd.DataFrame([cov_simple]))
+                    _render_sortable_all_but_first_table(pd.DataFrame([cov_simple]))
                 missing_counts = coverage.get("missing_counts", {})
                 if isinstance(missing_counts, dict) and missing_counts:
                     miss_df = pd.DataFrame(
                         [{"MetricName": k, "MissingCount": int(v)} for k, v in missing_counts.items()]
                     ).sort_values("MissingCount", ascending=False)
                     st.markdown("Coverage Missing Counts")
-                    _render_styled_table(miss_df)
+                    _render_sortable_all_but_first_table(miss_df)
 
             mfc = mh.get("missing_feature_counts", {})
             if isinstance(mfc, dict) and mfc:
@@ -2104,7 +2267,7 @@ def _show_monitoring_tab() -> None:
                     [{"MetricName": k, "MissingCount": int(v)} for k, v in mfc.items()]
                 ).sort_values("MissingCount", ascending=False)
                 st.markdown("Missing Feature Counts")
-                _render_styled_table(mfc_df)
+                _render_sortable_all_but_first_table(mfc_df)
 
             notes = mh.get("runtime_notes", [])
             if isinstance(notes, list) and notes:
@@ -2112,7 +2275,7 @@ def _show_monitoring_tab() -> None:
                 for n in notes:
                     st.caption(f"- {n}")
         elif isinstance(mh, list) and mh:
-            _render_styled_table(pd.json_normalize(mh, sep="."))
+            _render_sortable_all_but_first_table(pd.json_normalize(mh, sep="."))
         else:
             st.caption("Monitoring health report is empty.")
     except Exception:
