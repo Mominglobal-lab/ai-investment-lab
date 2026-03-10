@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 import sys
@@ -636,9 +636,9 @@ def _render_styled_table(df: pd.DataFrame) -> None:
     if numeric_cols:
         show[numeric_cols] = show[numeric_cols].round(2)
     try:
-        st.dataframe(show, width="stretch", hide_index=True)
+        st.dataframe(show, use_container_width=True, hide_index=True)
     except TypeError:
-        st.dataframe(show, width="stretch")
+        st.dataframe(show, use_container_width=True)
 
 
 def _render_sortable_centered_table(df: pd.DataFrame, center_cols: list[str]) -> None:
@@ -687,14 +687,14 @@ def _render_sortable_centered_table(df: pd.DataFrame, center_cols: list[str]) ->
     if valid_center_cols:
         styled = show.style.set_properties(subset=valid_center_cols, **{"text-align": "center"})
         try:
-            st.dataframe(styled, width="stretch", hide_index=True)
+            st.dataframe(styled, use_container_width=True, hide_index=True)
         except TypeError:
-            st.dataframe(styled, width="stretch")
+            st.dataframe(styled, use_container_width=True)
     else:
         try:
-            st.dataframe(show, width="stretch", hide_index=True)
+            st.dataframe(show, use_container_width=True, hide_index=True)
         except TypeError:
-            st.dataframe(show, width="stretch")
+            st.dataframe(show, use_container_width=True)
 
 
 def _render_sortable_all_but_first_table(df: pd.DataFrame) -> None:
@@ -814,9 +814,9 @@ def _render_explainability_table(df: pd.DataFrame, *, center_last_n: int = 1) ->
                 else (f"{float(v):.4f}" if (abs(float(v)) > 0 and abs(float(v)) < 0.1) else f"{float(v):.2f}")
             )
     try:
-        st.dataframe(display_df, width="stretch", hide_index=True)
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
     except TypeError:
-        st.dataframe(display_df, width="stretch")
+        st.dataframe(display_df, use_container_width=True)
 
 
 def _format_evidence_points_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -940,7 +940,7 @@ def _show_stock_tab() -> None:
         include_metadata = st.checkbox("Enrich metadata (slower)", value=False, key="stock_enrich")
     with right:
         st.caption(" ")
-        force_refresh = st.button("Refresh Stock Data", width="stretch", key="stock_refresh")
+        force_refresh = st.button("Refresh Stock Data", use_container_width=True, key="stock_refresh")
 
     cache_path, health_report_path = _stock_paths(universe)
     status = get_cache_status(cache_path, MAX_AGE_DAYS, required_columns=SCHEMA_COLUMNS)
@@ -1031,7 +1031,7 @@ def _show_stock_tab() -> None:
             st.session_state[k] = v
 
     with f4:
-        st.button("Reset Filters", width="stretch", key="stock_reset", on_click=_reset_stock_filters)
+        st.button("Reset Filters", use_container_width=True, key="stock_reset", on_click=_reset_stock_filters)
 
     with st.expander("Advanced Screening Filters", expanded=False):
         s1, s2, s3, s4 = st.columns(4)
@@ -1226,7 +1226,7 @@ def _show_fixed_income_tab() -> None:
         )
     with right:
         st.caption(" ")
-        force_refresh = st.button("Refresh Fixed-Income Data", width="stretch", key="fi_refresh")
+        force_refresh = st.button("Refresh Fixed-Income Data", use_container_width=True, key="fi_refresh")
 
     cache_path, health_report_path = _fi_paths(universe)
     status = get_cache_status(cache_path, MAX_AGE_DAYS, required_columns=FI_SCHEMA_COLUMNS)
@@ -1340,11 +1340,11 @@ def _show_portfolio_simulator_tab() -> None:
     with title_col:
         st.markdown("## Portfolio Decision Simulator")
     with act1:
-        refresh_clicked = st.button("Refresh Data", key="sim_refresh_data_btn", width="stretch")
+        refresh_clicked = st.button("Refresh Data", key="sim_refresh_data_btn", use_container_width=True)
     with act2:
-        run_clicked = st.button("Run Simulation", key="sim_run_btn", width="stretch")
+        run_clicked = st.button("Run Simulation", key="sim_run_btn", use_container_width=True)
     with act3:
-        export_clicked = st.button("Export Decision Brief", key="sim_export_brief", width="stretch")
+        export_clicked = st.button("Export Decision Brief", key="sim_export_brief", use_container_width=True)
 
     price_status = get_cache_status(PRICES_CACHE_PATH, MAX_AGE_DAYS, required_columns=PRICE_SCHEMA_COLUMNS)
     if (not price_status.exists) or (not price_status.schema_ok):
@@ -1588,7 +1588,7 @@ def _show_portfolio_simulator_tab() -> None:
                 growth_chart = alt.layer(growth_lines, risk_line).resolve_scale(y="independent").properties(height=320).interactive()
             else:
                 growth_chart = growth_lines.properties(height=320).interactive()
-            st.altair_chart(growth_chart, width="stretch")
+            st.altair_chart(growth_chart, use_container_width=True)
         else:
             st.caption("No growth data available.")
     with c2:
@@ -1616,7 +1616,7 @@ def _show_portfolio_simulator_tab() -> None:
                 .properties(height=320)
                 .interactive()
             )
-            st.altair_chart(draw_chart, width="stretch")
+            st.altair_chart(draw_chart, use_container_width=True)
         else:
             st.caption("No drawdown data available.")
 
@@ -1667,7 +1667,7 @@ def _show_decision_intelligence_tab() -> None:
     with title_col:
         st.markdown("## Decision Intelligence")
     with action_col:
-        build_models_clicked = st.button("Build Model Artifacts", key="di_build_models_btn", width="stretch")
+        build_models_clicked = st.button("Build Model Artifacts", key="di_build_models_btn", use_container_width=True)
 
     if build_models_clicked:
         with st.spinner("Building model artifacts..."):
@@ -1749,7 +1749,7 @@ def _show_decision_intelligence_tab() -> None:
             .configure_view(strokeOpacity=0)
             .interactive()
         )
-        st.altair_chart(chart, width="stretch")
+        st.altair_chart(chart, use_container_width=True)
 
     if risk_df is not None and not risk_df.empty and {"Date", "RiskScore", "RiskLevel"}.issubset(set(risk_df.columns)):
         st.markdown("#### Systemic Risk Timeline")
@@ -1777,7 +1777,7 @@ def _show_decision_intelligence_tab() -> None:
             .configure_view(strokeOpacity=0)
             .interactive()
         )
-        st.altair_chart(risk_chart, width="stretch")
+        st.altair_chart(risk_chart, use_container_width=True)
         st.markdown("#### Recent Risk Signals")
         _render_sortable_centered_table(ktmp.tail(30), ["RiskScore", "RiskLevel", "RiskFlags"])
 
@@ -1869,7 +1869,7 @@ def _show_explainability_tab() -> None:
         build_explain_clicked = st.button(
             "Build Explainability Artifacts",
             key="xpl_build_artifacts_btn",
-            width="stretch",
+            use_container_width=True,
         )
 
     if build_explain_clicked:
@@ -2036,7 +2036,7 @@ def _show_uncertainty_tab() -> None:
         build_uncertainty_clicked = st.button(
             "Build Uncertainty Artifacts",
             key="unc_build_artifacts_btn",
-            width="stretch",
+            use_container_width=True,
         )
 
     if build_uncertainty_clicked:
@@ -2172,7 +2172,7 @@ def _show_uncertainty_tab() -> None:
                     y="RiskP10:Q",
                     y2="RiskP90:Q",
                 )
-                st.altair_chart((band + line).properties(height=280), width="stretch")
+                st.altair_chart((band + line).properties(height=280), use_container_width=True)
         else:
             st.warning("Uncertainty cache missing. Showing only point estimate.")
             st.caption(f"RiskLevel: {row.get('RiskLevel', 'Unknown')}")
@@ -2186,7 +2186,7 @@ def _show_monitoring_tab() -> None:
         build_monitoring_clicked = st.button(
             "Build Monitoring Artifacts",
             key="mon_build_artifacts_btn",
-            width="stretch",
+            use_container_width=True,
         )
 
     if build_monitoring_clicked:
@@ -2349,7 +2349,7 @@ def _show_monitoring_tab() -> None:
                     .properties(height=300)
                     .interactive()
                 )
-                st.altair_chart(trend_chart, width="stretch")
+                st.altair_chart(trend_chart, use_container_width=True)
 
     # Section D: signal stability
     st.markdown("### D. Signal Stability")
