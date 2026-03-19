@@ -28,6 +28,7 @@ st.set_page_config(page_title="Investment Lab", layout="wide")
 
 STOCK_UNIVERSE_OPTIONS = ["S&P 500", "Nasdaq 100"]
 FI_UNIVERSE_OPTIONS = ["US Treasuries", "Bond ETFs"]
+SIM_BENCHMARK_OPTIONS = ["SPY", "QQQ", "IWM", "DIA"]
 MAX_AGE_DAYS = 7
 MIN_REFRESH_SUCCESS_RATIO = 0.25
 PRICE_SCHEMA_COLUMNS = ["Ticker", "Date", "AdjClose", "Close", "Volume"]
@@ -1279,7 +1280,12 @@ def _show_portfolio_simulator_tab() -> None:
             key="sim_weighting_mode",
         )
     with r1c3:
-        benchmark = st.text_input("Benchmark", value="SPY", key="sim_benchmark").strip().upper()
+        benchmark = st.selectbox(
+            "Benchmark",
+            SIM_BENCHMARK_OPTIONS,
+            index=0,
+            key="sim_benchmark",
+        )
 
     manual_weights_text = ""
     if weighting_mode == "Manual weights":
