@@ -100,8 +100,21 @@ def refresh_treasury_yields(*, lookback_years: int = 10) -> pd.DataFrame:
         url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
         response = requests.get(url, timeout=30)
         response.raise_for_status()
-        frame = pd.read_csv(StringIO(response.text), usecols=["DATE", series_id])
-        frame = frame.rename(columns={"DATE": "Date", series_id: column_name})
+        frame = pd.read_csv(StringIO(response.text))
+        if frame.empty:
+            raise ValueError(f"FRED response for {series_id} was empty")
+
+        cols = {str(c).strip().lower(): c for c in frame.columns}
+        date_col = cols.get("date")
+        value_col = cols.get(series_id.lower())
+        if date_col is None or value_col is None:
+            raise ValueError(
+                f"FRED response for {series_id} missing expected columns. "
+                f"Found columns: {list(frame.columns)}"
+            )
+
+        frame = frame.rename(columns={date_col: "Date", value_col: column_name})
+        frame = frame[["Date", column_name]]
         frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
         frame[column_name] = pd.to_numeric(frame[column_name], errors="coerce")
         frame = frame.dropna(subset=["Date"])
