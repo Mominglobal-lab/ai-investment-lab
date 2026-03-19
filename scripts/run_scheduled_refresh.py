@@ -91,7 +91,7 @@ def _stage_end(name: str, started_at: float) -> None:
 
 
 def refresh_treasury_yields(*, lookback_years: int = 10) -> pd.DataFrame:
-    end = pd.Timestamp.utcnow().normalize()
+    end = pd.Timestamp.utcnow().tz_localize(None).normalize()
     start = end - pd.DateOffset(years=max(int(lookback_years), 1))
 
     frames: list[pd.DataFrame] = []
@@ -105,7 +105,7 @@ def refresh_treasury_yields(*, lookback_years: int = 10) -> pd.DataFrame:
             raise ValueError(f"FRED response for {series_id} was empty")
 
         cols = {str(c).strip().lower(): c for c in frame.columns}
-        date_col = cols.get("date")
+        date_col = cols.get("date") or cols.get("observation_date")
         value_col = cols.get(series_id.lower())
         if date_col is None or value_col is None:
             raise ValueError(
@@ -115,7 +115,7 @@ def refresh_treasury_yields(*, lookback_years: int = 10) -> pd.DataFrame:
 
         frame = frame.rename(columns={date_col: "Date", value_col: column_name})
         frame = frame[["Date", column_name]]
-        frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
+        frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce", utc=True).dt.tz_localize(None)
         frame[column_name] = pd.to_numeric(frame[column_name], errors="coerce")
         frame = frame.dropna(subset=["Date"])
         frame = frame[(frame["Date"] >= start) & (frame["Date"] <= end)]
@@ -237,6 +237,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--benchmark", default="SPY", help="Benchmark ticker for prices and artifact builds.")
     parser.add_argument("--max-age-days", type=float, default=0.0, help="Freshness threshold passed into pipeline functions.")
+    parser.add_argument("--skip-stock", action="store_true", help="Skip rebuilding stock fundamentals caches.")
+    parser.add_argument("--skip-fixed-income", action="store_true", help="Skip rebuilding fixed-income caches.")
     parser.add_argument("--skip-treasury", action="store_true", help="Skip rebuilding the treasury yields cache.")
     parser.add_argument("--skip-prices", action="store_true", help="Skip rebuilding the shared prices cache.")
     parser.add_argument("--skip-models", action="store_true", help="Skip rebuilding decision model artifacts.")
@@ -253,13 +255,19 @@ def main() -> int:
     stock_universes = args.stock_universes or list(STOCK_TARGETS.keys())
     fi_universes = args.fi_universes or list(FIXED_INCOME_TARGETS.keys())
 
-    started_at = _stage_start("stock refresh")
-    refresh_stock_universes(stock_universes, max_age_days=float(args.max_age_days))
-    _stage_end("stock refresh", started_at)
+    if not args.skip_stock:
+        started_at = _stage_start("stock refresh")
+        refresh_stock_universes(stock_universes, max_age_days=float(args.max_age_days))
+        _stage_end("stock refresh", started_at)
+    else:
+        print("[SKIP] stock refresh", flush=True)
 
-    started_at = _stage_start("fixed-income refresh")
-    refresh_fixed_income_universes(fi_universes, max_age_days=float(args.max_age_days))
-    _stage_end("fixed-income refresh", started_at)
+    if not args.skip_fixed_income:
+        started_at = _stage_start("fixed-income refresh")
+        refresh_fixed_income_universes(fi_universes, max_age_days=float(args.max_age_days))
+        _stage_end("fixed-income refresh", started_at)
+    else:
+        print("[SKIP] fixed-income refresh", flush=True)
 
     if not args.skip_treasury:
         started_at = _stage_start("treasury refresh")
