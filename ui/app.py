@@ -19,23 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from data_pipeline.cache_manager import get_cache_status, read_parquet_safe, save_parquet_atomic, write_json_report
-from data_pipeline.data_fetcher import (
-    FI_SCHEMA_COLUMNS,
-    SCHEMA_COLUMNS,
-    fetch_ticker_details,
-    fetch_universe_tickers,
-    refresh_fundamentals_yfinance,
-)
-from data_pipeline.run_pipeline import (
-    run_decision_models_pipeline,
-    run_explainability_pipeline,
-    run_fixed_income_pipeline,
-    run_monitoring_pipeline,
-    run_pipeline,
-    run_prices_cache_pipeline,
-    run_uncertainty_pipeline,
-)
+from data_pipeline.cache_manager import get_cache_status, read_parquet_safe
+from data_pipeline.data_fetcher import FI_SCHEMA_COLUMNS, SCHEMA_COLUMNS
 from reports.decision_brief import generate_decision_brief
 from simulation.portfolio_simulator import simulate_portfolio
 
@@ -421,18 +406,6 @@ def _apply_premium_theme() -> None:
 
 
 _apply_premium_theme()
-
-
-@dataclass(frozen=True)
-class StockUpdateResult:
-    data: pd.DataFrame
-    requested_count: int
-    success_count: int
-    failure_count: int
-    rate_limited: bool
-    errors_sample: list[str]
-    wrote_cache: bool
-    reason: str
 
 
 def _stock_paths(universe: str) -> tuple[str, str]:
@@ -881,51 +854,11 @@ def _format_evidence_card_table(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _update_stock_cache(cache_path: str, health_report_path: str, universe: str, include_metadata: bool) -> StockUpdateResult:
-    tickers = fetch_universe_tickers(universe)
-    refresh = refresh_fundamentals_yfinance(tickers, include_metadata=include_metadata)
-    df = _ensure_stock_schema(refresh.data)
-
-    reason = "cache updated"
-    wrote_cache = False
-    if df.empty:
-        reason = "no rows returned from refresh"
-    elif refresh.requested_count > 0 and (refresh.success_count / refresh.requested_count) < MIN_REFRESH_SUCCESS_RATIO:
-        reason = f"success ratio {(refresh.success_count / refresh.requested_count):.1%} below threshold {MIN_REFRESH_SUCCESS_RATIO:.0%}"
-    else:
-        save_parquet_atomic(df, cache_path)
-        wrote_cache = True
-
-    report = {
-        "run_timestamp": pd.Timestamp.utcnow().isoformat(),
-        "universe": universe,
-        "requested_count": int(refresh.requested_count),
-        "success_count": int(refresh.success_count),
-        "failure_count": int(refresh.failure_count),
-        "rate_limited": bool(refresh.rate_limited),
-        "wrote_cache": bool(wrote_cache),
-        "reason": str(reason),
-        "errors_sample": list(refresh.errors_sample or []),
-    }
-    write_json_report(report, health_report_path)
-
-    return StockUpdateResult(
-        data=df,
-        requested_count=refresh.requested_count,
-        success_count=refresh.success_count,
-        failure_count=refresh.failure_count,
-        rate_limited=refresh.rate_limited,
-        errors_sample=refresh.errors_sample,
-        wrote_cache=wrote_cache,
-        reason=reason,
-    )
-
-
 def _show_stock_tab() -> None:
     st.markdown("## Stock Screener")
     status_text = ""
     telemetry_text = ""
-    left, mid, right = st.columns([2.3, 1.0, 1.4], vertical_alignment="bottom")
+    left, right = st.columns([2.3, 1.4], vertical_alignment="bottom")
     with left:
         st.caption("Universe")
         universe = st.selectbox(
@@ -935,14 +868,11 @@ def _show_stock_tab() -> None:
             key="stock_universe",
             label_visibility="collapsed",
         )
-    with mid:
-        st.caption(" ")
-        include_metadata = st.checkbox("Enrich metadata (slower)", value=False, key="stock_enrich")
     with right:
-        st.caption(" ")
-        force_refresh = st.button("Refresh Stock Data", use_container_width=True, key="stock_refresh")
+        st.caption("Data Source")
+        st.caption("Scheduled cache refresh")
 
-    cache_path, health_report_path = _stock_paths(universe)
+    cache_path, _health_report_path = _stock_paths(universe)
     status = get_cache_status(cache_path, MAX_AGE_DAYS, required_columns=SCHEMA_COLUMNS)
     status_text = (
         ("No cache" if not status.exists else f"Cache age: {status.age_days:.2f} days")
@@ -953,30 +883,18 @@ def _show_stock_tab() -> None:
     if stale_df is not None:
         stale_df = _ensure_stock_schema(stale_df)
 
-    needs_refresh = force_refresh or stale_df is None or (not status.is_fresh) or (not status.schema_ok)
-    if needs_refresh:
-        with st.spinner("Refreshing stock data..."):
-            try:
-                update = _update_stock_cache(cache_path, health_report_path, universe, include_metadata)
-                if update.wrote_cache:
-                    df_raw = update.data
-                elif stale_df is not None and not stale_df.empty:
-                    df_raw = stale_df
-                    st.warning(f"Refresh incomplete ({update.reason}). Using stale cache.")
-                else:
-                    df_raw = update.data
-                    st.warning(f"Refresh incomplete ({update.reason}).")
-                telemetry_text = f"Updated {update.success_count}/{update.requested_count} tickers"
-            except Exception as e:
-                if stale_df is not None and not stale_df.empty:
-                    df_raw = stale_df
-                    st.warning(f"Refresh failed ({e}). Using stale cache.")
-                else:
-                    st.error(f"Refresh failed and no usable cache is available: {e}")
-                    return
-    else:
-        df_raw = stale_df
-        telemetry_text = "Using fresh stock cache"
+    df_raw = stale_df
+    if stale_df is None:
+        if not status.exists:
+            st.warning("Stock cache is missing. This UI now reads scheduled cache output only.")
+        elif not status.schema_ok:
+            st.warning("Stock cache schema is invalid. Rebuild the scheduled pipeline output before using this tab.")
+        else:
+            st.warning("Stock cache could not be loaded.")
+        return
+    telemetry_text = "Using cached stock data"
+    if not status.is_fresh:
+        telemetry_text = "Using stale stock cache until the next scheduled refresh"
 
     if df_raw is None or df_raw.empty:
         st.warning("No stock data available.")
@@ -1192,16 +1110,19 @@ def _show_stock_tab() -> None:
 
     ticker = st.selectbox("Ticker details", options=[""] + df["Ticker"].astype(str).tolist(), index=0, key="stock_detail_ticker")
     if ticker:
-        try:
-            d = fetch_ticker_details(ticker)
+        row = df[df["Ticker"] == ticker].head(1)
+        if not row.empty:
+            d = row.iloc[0]
             st.markdown(f"**{d.get('Company') or ticker} ({ticker})**")
             st.write(f"Sector: {d.get('Sector')}")
             st.write(f"Close: {d.get('Close')}")
             st.write(f"P/E: {d.get('PE_Ratio')}")
             st.write(f"PEG: {d.get('PEG_Ratio')}")
             st.write(f"Rule of 40: {d.get('Rule_of_40')}")
-        except Exception as e:
-            st.caption(f"Live detail unavailable: {e}")
+            if "QualityScore" in d.index:
+                st.write(f"Quality score: {d.get('QualityScore')}")
+        else:
+            st.caption("Ticker detail unavailable in cache.")
 
     st.divider()
     if status_text:
@@ -1225,8 +1146,8 @@ def _show_fixed_income_tab() -> None:
             label_visibility="collapsed",
         )
     with right:
-        st.caption(" ")
-        force_refresh = st.button("Refresh Fixed-Income Data", use_container_width=True, key="fi_refresh")
+        st.caption("Data Source")
+        st.caption("Scheduled cache refresh")
 
     cache_path, health_report_path = _fi_paths(universe)
     status = get_cache_status(cache_path, MAX_AGE_DAYS, required_columns=FI_SCHEMA_COLUMNS)
@@ -1236,23 +1157,18 @@ def _show_fixed_income_tab() -> None:
     )
 
     stale_df, _err = read_parquet_safe(cache_path) if (status.exists and status.schema_ok) else (None, None)
-    needs_refresh = force_refresh or stale_df is None or (not status.is_fresh) or (not status.schema_ok)
-    if needs_refresh:
-        with st.spinner("Refreshing fixed-income data..."):
-            result = run_fixed_income_pipeline(
-                cache_path=cache_path,
-                health_report_path=health_report_path,
-                universe=universe,
-                max_age_days=MAX_AGE_DAYS,
-            )
-            df_raw = result.data
-            if (not result.wrote_cache) and stale_df is not None and not stale_df.empty:
-                df_raw = stale_df
-                st.warning(f"Refresh incomplete ({result.reason}). Using stale cache.")
-            telemetry_text = result.reason
-    else:
-        df_raw = stale_df
-        telemetry_text = "Using fresh fixed-income cache"
+    df_raw = stale_df
+    if stale_df is None:
+        if not status.exists:
+            st.warning("Fixed-income cache is missing. This UI now reads scheduled cache output only.")
+        elif not status.schema_ok:
+            st.warning("Fixed-income cache schema is invalid. Rebuild the scheduled pipeline output before using this tab.")
+        else:
+            st.warning("Fixed-income cache could not be loaded.")
+        return
+    telemetry_text = "Using cached fixed-income data"
+    if not status.is_fresh:
+        telemetry_text = "Using stale fixed-income cache until the next scheduled refresh"
 
     if df_raw is None or df_raw.empty:
         st.warning("No fixed-income data available.")
@@ -1336,31 +1252,17 @@ def _show_fixed_income_tab() -> None:
 
 
 def _show_portfolio_simulator_tab() -> None:
-    title_col, act1, act2, act3 = st.columns([3.2, 1.0, 1.0, 1.0], vertical_alignment="center")
+    title_col, act1, act2 = st.columns([3.8, 1.0, 1.0], vertical_alignment="center")
     with title_col:
         st.markdown("## Portfolio Decision Simulator")
     with act1:
-        refresh_clicked = st.button("Refresh Data", key="sim_refresh_data_btn", use_container_width=True)
-    with act2:
         run_clicked = st.button("Run Simulation", key="sim_run_btn", use_container_width=True)
-    with act3:
+    with act2:
         export_clicked = st.button("Export Decision Brief", key="sim_export_brief", use_container_width=True)
 
     price_status = get_cache_status(PRICES_CACHE_PATH, MAX_AGE_DAYS, required_columns=PRICE_SCHEMA_COLUMNS)
     if (not price_status.exists) or (not price_status.schema_ok):
-        st.warning("Price cache not found. Please run pipeline refresh.")
-        if refresh_clicked:
-            with st.spinner("Refreshing pipeline and rebuilding prices cache..."):
-                try:
-                    run_pipeline(
-                        build_prices_cache=True,
-                        max_age_days=MAX_AGE_DAYS,
-                        benchmark_ticker=str(st.session_state.get("sim_benchmark", "SPY") or "SPY").strip().upper(),
-                    )
-                    st.success("Prices cache refresh completed.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Refresh failed: {e}")
+        st.warning("Price cache not found or invalid. Run the scheduled pipeline before using the simulator.")
         return
 
     fundamentals = _load_fundamentals_union()
@@ -1386,25 +1288,6 @@ def _show_portfolio_simulator_tab() -> None:
             value="0.25, 0.25, 0.25, 0.25",
             key="sim_manual_weights",
         )
-
-    if refresh_clicked:
-        with st.spinner("Refreshing prices cache..."):
-            try:
-                refresh_result = run_prices_cache_pipeline(
-                    prices_cache_path=PRICES_CACHE_PATH,
-                    health_report_path=PRICES_HEALTH_PATH,
-                    benchmark_ticker=benchmark or "SPY",
-                    max_age_days=0.0,
-                )
-                st.success(
-                    "Prices cache refreshed. "
-                    f"Requested: {refresh_result.requested_count}, "
-                    f"Success: {refresh_result.success_count}, "
-                    f"Failed: {refresh_result.failure_count}."
-                )
-                st.rerun()
-            except Exception as e:
-                st.error(f"Refresh failed: {e}")
 
     r2c1, r2c2, r2c3, r2c4, r2c5 = st.columns(5, vertical_alignment="bottom")
     with r2c1:
@@ -1663,22 +1546,8 @@ def _show_portfolio_simulator_tab() -> None:
 
 
 def _show_decision_intelligence_tab() -> None:
-    title_col, action_col = st.columns([4.2, 1.2], vertical_alignment="center")
-    with title_col:
-        st.markdown("## Decision Intelligence")
-    with action_col:
-        build_models_clicked = st.button("Build Model Artifacts", key="di_build_models_btn", use_container_width=True)
-
-    if build_models_clicked:
-        with st.spinner("Building model artifacts..."):
-            try:
-                run_decision_models_pipeline(
-                    benchmark_ticker=str(st.session_state.get("sim_benchmark", "SPY") or "SPY").strip().upper(),
-                )
-                st.success("Model artifacts built successfully.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Model artifact build failed: {e}")
+    st.markdown("## Decision Intelligence")
+    st.caption("Artifacts are read from cache generated by the scheduled pipeline.")
 
     quality_df, _qerr = read_parquet_safe(QUALITY_CACHE_PATH)
     regime_df, _rerr = read_parquet_safe(REGIME_CACHE_PATH)
@@ -1862,30 +1731,8 @@ def _show_decision_intelligence_tab() -> None:
 
 
 def _show_explainability_tab() -> None:
-    title_col, action_col = st.columns([4.2, 1.2], vertical_alignment="center")
-    with title_col:
-        st.markdown("## Explainability and Evidence")
-    with action_col:
-        build_explain_clicked = st.button(
-            "Build Explainability Artifacts",
-            key="xpl_build_artifacts_btn",
-            use_container_width=True,
-        )
-
-    if build_explain_clicked:
-        benchmark = str(st.session_state.get("sim_benchmark", "SPY") or "SPY").strip().upper()
-        with st.spinner("Building explainability artifacts..."):
-            try:
-                q_base, _ = read_parquet_safe(QUALITY_CACHE_PATH)
-                r_base, _ = read_parquet_safe(REGIME_CACHE_PATH)
-                k_base, _ = read_parquet_safe(RISK_CACHE_PATH)
-                if q_base is None or r_base is None or k_base is None:
-                    run_decision_models_pipeline(benchmark_ticker=benchmark)
-                run_explainability_pipeline(benchmark_ticker=benchmark)
-                st.success("Explainability artifacts built successfully.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Explainability artifact build failed: {e}")
+    st.markdown("## Explainability and Evidence")
+    st.caption("Artifacts are read from cache generated by the scheduled pipeline.")
 
     import json
 
@@ -2029,30 +1876,8 @@ def _show_explainability_tab() -> None:
 
 
 def _show_uncertainty_tab() -> None:
-    title_col, action_col = st.columns([4.2, 1.2], vertical_alignment="center")
-    with title_col:
-        st.markdown("## Uncertainty and Confidence")
-    with action_col:
-        build_uncertainty_clicked = st.button(
-            "Build Uncertainty Artifacts",
-            key="unc_build_artifacts_btn",
-            use_container_width=True,
-        )
-
-    if build_uncertainty_clicked:
-        benchmark = str(st.session_state.get("sim_benchmark", "SPY") or "SPY").strip().upper()
-        with st.spinner("Building uncertainty artifacts..."):
-            try:
-                q_base, _ = read_parquet_safe(QUALITY_CACHE_PATH)
-                r_base, _ = read_parquet_safe(REGIME_CACHE_PATH)
-                k_base, _ = read_parquet_safe(RISK_CACHE_PATH)
-                if q_base is None or r_base is None or k_base is None:
-                    run_decision_models_pipeline(benchmark_ticker=benchmark)
-                run_uncertainty_pipeline(benchmark_ticker=benchmark)
-                st.success("Uncertainty artifacts built successfully.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Uncertainty artifact build failed: {e}")
+    st.markdown("## Uncertainty and Confidence")
+    st.caption("Artifacts are read from cache generated by the scheduled pipeline.")
 
     qu, _qe = read_parquet_safe(QUALITY_UNCERTAINTY_PATH)
     rp, _re = read_parquet_safe(REGIME_PROB_PATH)
@@ -2179,29 +2004,8 @@ def _show_uncertainty_tab() -> None:
 
 
 def _show_monitoring_tab() -> None:
-    title_col, action_col = st.columns([4.2, 1.2], vertical_alignment="center")
-    with title_col:
-        st.markdown("## Drift, Monitoring, and Early Warning")
-    with action_col:
-        build_monitoring_clicked = st.button(
-            "Build Monitoring Artifacts",
-            key="mon_build_artifacts_btn",
-            use_container_width=True,
-        )
-
-    if build_monitoring_clicked:
-        benchmark = str(st.session_state.get("sim_benchmark", "SPY") or "SPY").strip().upper()
-        with st.spinner("Building monitoring artifacts..."):
-            try:
-                r_base, _ = read_parquet_safe(REGIME_CACHE_PATH)
-                k_base, _ = read_parquet_safe(RISK_CACHE_PATH)
-                if r_base is None or k_base is None:
-                    run_decision_models_pipeline(benchmark_ticker=benchmark)
-                run_monitoring_pipeline(benchmark_ticker=benchmark)
-                st.success("Monitoring artifacts built successfully.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Monitoring artifact build failed: {e}")
+    st.markdown("## Drift, Monitoring, and Early Warning")
+    st.caption("Artifacts are read from cache generated by the scheduled pipeline.")
 
     import json
 
