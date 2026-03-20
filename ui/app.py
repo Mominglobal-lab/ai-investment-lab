@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import html
 import sys
+import textwrap
 from pathlib import Path
 
 import altair as alt
@@ -615,7 +617,7 @@ def _render_styled_table(df: pd.DataFrame) -> None:
         st.dataframe(show, use_container_width=True)
 
 
-def _render_sortable_centered_table(df: pd.DataFrame, center_cols: list[str]) -> None:
+def _render_sortable_centered_table(df: pd.DataFrame, center_cols: list[str], page_size: int | None = None) -> None:
     show = df.copy()
     numeric_cols = show.select_dtypes(include=["number"]).columns.tolist()
     if numeric_cols:
@@ -634,11 +636,19 @@ def _render_sortable_centered_table(df: pd.DataFrame, center_cols: list[str]) ->
             )
         grid_options = gb.build()
         grid_options["suppressHorizontalScroll"] = False
+        if page_size is not None and int(page_size) > 0:
+            grid_options["pagination"] = True
+            grid_options["paginationPageSize"] = int(page_size)
         row_h = 36
         header_h = 40
         grid_options["rowHeight"] = row_h
         grid_options["headerHeight"] = header_h
-        grid_height = int(header_h + (max(1, len(show)) * row_h) + 2)
+        visible_rows = (
+            min(max(1, len(show)), int(page_size))
+            if page_size is not None and int(page_size) > 0
+            else max(1, len(show))
+        )
+        grid_height = int(header_h + (max(1, visible_rows) * row_h) + 2)
         AgGrid(
             show,
             gridOptions=grid_options,
@@ -681,6 +691,312 @@ def _render_sortable_first_col_centered_table(df: pd.DataFrame) -> None:
     cols = list(df.columns)
     center_cols = cols[:1] if cols else []
     _render_sortable_centered_table(df, center_cols)
+
+
+def _render_stock_ticker_detail_card(d: pd.Series, ticker: str) -> None:
+    def _as_num(value: object) -> float | None:
+        v = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+        return None if pd.isna(v) else float(v)
+
+    def _fmt_plain(value: object, decimals: int = 2) -> str:
+        v = _as_num(value)
+        return "N/A" if v is None else f"{v:.{decimals}f}"
+
+    def _fmt_pct(value: object, decimals: int = 2, scale: float = 1.0) -> str:
+        v = _as_num(value)
+        return "N/A" if v is None else f"{(v * scale):.{decimals}f}%"
+
+    def _fmt_money(value: object, decimals: int = 2) -> str:
+        v = _as_num(value)
+        return "N/A" if v is None else f"${v:,.{decimals}f}"
+
+    company = str(d.get("Company") or ticker)
+    sector = str(d.get("Sector") or "N/A")
+    quality_tier = str(d.get("QualityTier") or "Unknown")
+    quality_score = _as_num(d.get("QualityScore"))
+    quality_score_txt = "N/A" if quality_score is None else f"{quality_score:.1f} / 100"
+    quality_bar = 0.0 if quality_score is None else max(0.0, min(100.0, quality_score))
+
+    tier_colors = {"Strong": "#2f9e44", "Neutral": "#d4a017", "Weak": "#d94841"}
+    tier_bg = tier_colors.get(quality_tier, "#6b7280")
+
+    market_cap_b = _as_num(d.get("MarketCap"))
+    market_cap_txt = "N/A" if market_cap_b is None else f"${market_cap_b / 1e9:.1f}B"
+
+    st.markdown(
+        textwrap.dedent(
+            f"""
+        <style>
+        .stock-detail-card {{
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 18px 20px;
+            color: var(--text);
+            width: 100%;
+            max-width: none;
+            box-sizing: border-box;
+            box-shadow: var(--shadow);
+        }}
+        .stock-detail-head {{
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+        }}
+        .stock-detail-title {{ font-size: 1.2rem; font-weight: 700; line-height: 1.2; }}
+        .stock-detail-sub {{ color: var(--muted); font-size: 1.1rem; font-weight: 600; }}
+        .stock-detail-badge {{
+            background: {tier_bg};
+            color: #f7f7f7;
+            padding: 4px 12px;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 0.95rem;
+            white-space: nowrap;
+        }}
+        .stock-detail-price {{
+            margin-top: 10px;
+            font-size: 2.6rem;
+            font-weight: 800;
+        }}
+        .stock-detail-price-sub {{
+            color: var(--muted);
+            font-size: 0.95rem;
+            margin-left: 8px;
+            font-weight: 600;
+        }}
+        .stock-detail-divider {{
+            border-top: 1px solid var(--border);
+            margin: 14px 0 10px 0;
+        }}
+        .stock-detail-section-title {{
+            color: var(--muted);
+            font-size: 0.95rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }}
+        .stock-detail-grid {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }}
+        .stock-detail-grid.two {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+        .stock-detail-chip {{
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 10px 14px;
+        }}
+        .stock-detail-chip .k {{ color: var(--muted); font-size: 1.05rem; font-weight: 600; }}
+        .stock-detail-chip .v {{ color: var(--text); font-size: 1.2rem; font-weight: 800; margin-top: 2px; }}
+        .stock-quality-row {{ display: flex; align-items: center; gap: 10px; }}
+        .stock-quality-bar-wrap {{
+            flex: 1;
+            height: 10px;
+            background: rgba(255, 255, 255, 0.12);
+            border-radius: 999px;
+            overflow: hidden;
+        }}
+        .stock-quality-bar {{
+            height: 100%;
+            width: {quality_bar:.1f}%;
+            background: linear-gradient(90deg, #20c997, #2b8a3e);
+        }}
+        .stock-quality-score {{ font-size: 1.0rem; font-weight: 700; }}
+        .stock-quality-pill {{
+            background: var(--surface-2);
+            border-radius: 999px;
+            padding: 3px 12px;
+            font-weight: 700;
+            color: var(--text);
+        }}
+        </style>
+        <div class="stock-detail-card">
+            <div class="stock-detail-head">
+                <div>
+                    <div class="stock-detail-title">{html.escape(company)}</div>
+                    <div class="stock-detail-sub">{html.escape(str(ticker).upper())} - {html.escape(sector)}</div>
+                </div>
+                <div class="stock-detail-badge">{html.escape(quality_tier)}</div>
+            </div>
+            <div class="stock-detail-price">
+                {_fmt_money(d.get("Close"), 2)}
+                <span class="stock-detail-price-sub">close - Mkt Cap {market_cap_txt}</span>
+            </div>
+            <div class="stock-detail-divider"></div>
+            <div class="stock-detail-section-title">Growth</div>
+            <div class="stock-detail-grid two">
+                <div class="stock-detail-chip"><div class="k">Revenue growth</div><div class="v">{_fmt_pct(d.get("Revenue_Growth_YoY_Pct"), 2, 1.0)}</div></div>
+                <div class="stock-detail-chip"><div class="k">Earnings growth</div><div class="v">{_fmt_pct(d.get("Earnings_Growth_Pct"), 2, 1.0)}</div></div>
+            </div>
+            <div class="stock-detail-divider"></div>
+            <div class="stock-detail-section-title">Valuation</div>
+            <div class="stock-detail-grid">
+                <div class="stock-detail-chip"><div class="k">P/E</div><div class="v">{_fmt_plain(d.get("PE_Ratio"), 2)}</div></div>
+                <div class="stock-detail-chip"><div class="k">PEG</div><div class="v">{_fmt_plain(d.get("PEG_Ratio"), 2)}</div></div>
+                <div class="stock-detail-chip"><div class="k">Rule of 40</div><div class="v">{_fmt_plain(d.get("Rule_of_40"), 1)}</div></div>
+            </div>
+            <div class="stock-detail-divider"></div>
+            <div class="stock-detail-section-title">Profitability</div>
+            <div class="stock-detail-grid two">
+                <div class="stock-detail-chip"><div class="k">EBITDA margin</div><div class="v">{_fmt_pct(d.get("EBITDA_Margin"), 2, 100.0)}</div></div>
+                <div class="stock-detail-chip"><div class="k">ROE</div><div class="v">{_fmt_pct(d.get("ROE"), 2, 100.0)}</div></div>
+            </div>
+            <div class="stock-detail-divider"></div>
+            <div class="stock-detail-section-title">Quality</div>
+            <div class="stock-quality-row">
+                <div class="stock-quality-bar-wrap"><div class="stock-quality-bar"></div></div>
+                <div class="stock-quality-score">{quality_score_txt}</div>
+                <div class="stock-quality-pill">{html.escape(quality_tier)}</div>
+            </div>
+        </div>
+        """,
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _render_fixed_income_detail_card(row: pd.Series, symbol: str) -> None:
+    def _as_num(value: object) -> float | None:
+        v = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+        return None if pd.isna(v) else float(v)
+
+    def _fmt_plain(value: object, decimals: int = 2) -> str:
+        v = _as_num(value)
+        return "N/A" if v is None else f"{v:.{decimals}f}"
+
+    def _fmt_pct(value: object, decimals: int = 2) -> str:
+        v = _as_num(value)
+        return "N/A" if v is None else f"{v:.{decimals}f}%"
+
+    def _fmt_money(value: object, decimals: int = 2) -> str:
+        v = _as_num(value)
+        return "N/A" if v is None else f"${v:,.{decimals}f}"
+
+    name = str(row.get("Name") or symbol)
+    universe = str(row.get("Universe") or "N/A")
+    inst_type = str(row.get("Type") or "Instrument")
+    maturity_bucket = str(row.get("Maturity_Bucket") or "N/A")
+    aum = _as_num(row.get("AUM"))
+    aum_txt = "N/A" if aum is None else f"${aum / 1e9:.2f}B"
+    duration = _as_num(row.get("Duration_Years"))
+    price_impact = "N/A" if duration is None else f"{-duration:.2f}%"
+
+    yield_pct = _as_num(row.get("Yield_Pct"))
+    if yield_pct is None:
+        rating_label = "Unknown"
+        rating_bg = "#6b7280"
+    elif yield_pct >= 6.0:
+        rating_label = "High Yield"
+        rating_bg = "#d94841"
+    elif yield_pct >= 3.0:
+        rating_label = "Income"
+        rating_bg = "#2f9e44"
+    else:
+        rating_label = "Low Yield"
+        rating_bg = "#3b82f6"
+
+    st.markdown(
+        textwrap.dedent(
+            f"""
+        <style>
+        .fi-detail-card {{
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 18px 20px;
+            color: var(--text);
+            width: 100%;
+            max-width: none;
+            box-sizing: border-box;
+            box-shadow: var(--shadow);
+        }}
+        .fi-detail-head {{
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+        }}
+        .fi-detail-title {{ font-size: 1.2rem; font-weight: 700; line-height: 1.2; }}
+        .fi-detail-sub {{ color: var(--muted); font-size: 1.1rem; font-weight: 600; }}
+        .fi-detail-badge {{
+            background: {rating_bg};
+            color: #f7f7f7;
+            padding: 4px 12px;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 0.95rem;
+            white-space: nowrap;
+        }}
+        .fi-detail-price {{
+            margin-top: 10px;
+            font-size: 2.3rem;
+            font-weight: 800;
+        }}
+        .fi-detail-price-sub {{
+            color: var(--muted);
+            font-size: 0.95rem;
+            margin-left: 8px;
+            font-weight: 600;
+        }}
+        .fi-detail-divider {{
+            border-top: 1px solid var(--border);
+            margin: 14px 0 10px 0;
+        }}
+        .fi-detail-section-title {{
+            color: var(--muted);
+            font-size: 0.95rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }}
+        .fi-detail-grid {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }}
+        .fi-detail-grid.two {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+        .fi-detail-chip {{
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 10px 14px;
+        }}
+        .fi-detail-chip .k {{ color: var(--muted); font-size: 1.05rem; font-weight: 600; }}
+        .fi-detail-chip .v {{ color: var(--text); font-size: 1.2rem; font-weight: 800; margin-top: 2px; }}
+        </style>
+        <div class="fi-detail-card">
+            <div class="fi-detail-head">
+                <div>
+                    <div class="fi-detail-title">{html.escape(name)}</div>
+                    <div class="fi-detail-sub">{html.escape(str(symbol).upper())} - {html.escape(universe)}</div>
+                </div>
+                <div class="fi-detail-badge">{html.escape(rating_label)}</div>
+            </div>
+            <div class="fi-detail-price">
+                {_fmt_money(row.get("Price"), 2)}
+                <span class="fi-detail-price-sub">{html.escape(inst_type)} - {html.escape(maturity_bucket)}</span>
+            </div>
+            <div class="fi-detail-divider"></div>
+            <div class="fi-detail-section-title">Yield & Duration</div>
+            <div class="fi-detail-grid two">
+                <div class="fi-detail-chip"><div class="k">Yield</div><div class="v">{_fmt_pct(row.get("Yield_Pct"), 2)}</div></div>
+                <div class="fi-detail-chip"><div class="k">Duration (yrs)</div><div class="v">{_fmt_plain(row.get("Duration_Years"), 2)}</div></div>
+            </div>
+            <div class="fi-detail-divider"></div>
+            <div class="fi-detail-section-title">Costs & Size</div>
+            <div class="fi-detail-grid two">
+                <div class="fi-detail-chip"><div class="k">Expense ratio</div><div class="v">{_fmt_pct(row.get("Expense_Ratio_Pct"), 2)}</div></div>
+                <div class="fi-detail-chip"><div class="k">AUM</div><div class="v">{aum_txt}</div></div>
+            </div>
+            <div class="fi-detail-divider"></div>
+            <div class="fi-detail-section-title">Rate Shock</div>
+            <div class="fi-detail-grid">
+                <div class="fi-detail-chip"><div class="k">Estimated price impact for +100 bps</div><div class="v">{price_impact}</div></div>
+                <div class="fi-detail-chip"><div class="k">Maturity bucket</div><div class="v">{html.escape(maturity_bucket)}</div></div>
+                <div class="fi-detail-chip"><div class="k">Instrument type</div><div class="v">{html.escape(inst_type)}</div></div>
+            </div>
+        </div>
+        """
+        ),
+        unsafe_allow_html=True,
+    )
 
 
 def _render_explainability_table(df: pd.DataFrame, *, center_last_n: int = 1) -> None:
@@ -859,19 +1175,14 @@ def _show_stock_tab() -> None:
     st.markdown("## Stock Screener")
     status_text = ""
     telemetry_text = ""
-    left, right = st.columns([2.3, 1.4], vertical_alignment="bottom")
-    with left:
-        st.caption("Universe")
-        universe = st.selectbox(
-            "Universe",
-            STOCK_UNIVERSE_OPTIONS,
-            index=0,
-            key="stock_universe",
-            label_visibility="collapsed",
-        )
-    with right:
-        st.caption("Data Source")
-        st.caption("Scheduled cache refresh")
+    st.caption("Universe")
+    universe = st.selectbox(
+        "Universe",
+        STOCK_UNIVERSE_OPTIONS,
+        index=0,
+        key="stock_universe",
+        label_visibility="collapsed",
+    )
 
     cache_path, _health_report_path = _stock_paths(universe)
     status = get_cache_status(cache_path, MAX_AGE_DAYS, required_columns=SCHEMA_COLUMNS)
@@ -1107,6 +1418,7 @@ def _show_stock_tab() -> None:
             "EBITDA Margin (Pct)",
             "ROE (Pct)",
         ],
+        page_size=20,
     )
 
     ticker = st.selectbox("Ticker details", options=[""] + df["Ticker"].astype(str).tolist(), index=0, key="stock_detail_ticker")
@@ -1114,41 +1426,25 @@ def _show_stock_tab() -> None:
         row = df[df["Ticker"] == ticker].head(1)
         if not row.empty:
             d = row.iloc[0]
-            st.markdown(f"**{d.get('Company') or ticker} ({ticker})**")
-            st.write(f"Sector: {d.get('Sector')}")
-            st.write(f"Close: {d.get('Close')}")
-            st.write(f"P/E: {d.get('PE_Ratio')}")
-            st.write(f"PEG: {d.get('PEG_Ratio')}")
-            st.write(f"Rule of 40: {d.get('Rule_of_40')}")
-            if "QualityScore" in d.index:
-                st.write(f"Quality score: {d.get('QualityScore')}")
+            _render_stock_ticker_detail_card(d, ticker)
         else:
             st.caption("Ticker detail unavailable in cache.")
 
     st.divider()
-    if status_text:
-        st.caption(status_text)
-    if telemetry_text:
-        st.caption(telemetry_text)
 
 
 def _show_fixed_income_tab() -> None:
     st.markdown("## Bond & Treasury Screener")
     status_text = ""
     telemetry_text = ""
-    left, right = st.columns([2.3, 1.4], vertical_alignment="bottom")
-    with left:
-        st.caption("Universe")
-        universe = st.selectbox(
-            "Universe",
-            FI_UNIVERSE_OPTIONS,
-            index=0,
-            key="fi_universe",
-            label_visibility="collapsed",
-        )
-    with right:
-        st.caption("Data Source")
-        st.caption("Scheduled cache refresh")
+    st.caption("Universe")
+    universe = st.selectbox(
+        "Universe",
+        FI_UNIVERSE_OPTIONS,
+        index=0,
+        key="fi_universe",
+        label_visibility="collapsed",
+    )
 
     cache_path, health_report_path = _fi_paths(universe)
     status = get_cache_status(cache_path, MAX_AGE_DAYS, required_columns=FI_SCHEMA_COLUMNS)
@@ -1231,25 +1527,15 @@ def _show_fixed_income_tab() -> None:
             "Expense_Ratio_Pct",
             "AUM (B)",
         ],
+        page_size=20,
     )
 
     detail_symbol = st.selectbox("Instrument details", options=[""] + df["Symbol"].astype(str).tolist(), index=0, key="fi_detail")
     if detail_symbol:
         row = df[df["Symbol"] == detail_symbol].head(1).iloc[0]
-        st.markdown(f"**{row.get('Name')} ({detail_symbol})**")
-        st.write(f"Yield (%): {row.get('Yield_Pct')}")
-        st.write(f"Duration (yrs): {row.get('Duration_Years')}")
-        st.write(f"Expense ratio (%): {row.get('Expense_Ratio_Pct')}")
-        st.write(f"AUM: {row.get('AUM')}")
-        if pd.notna(row.get("Duration_Years")):
-            shock = -float(row["Duration_Years"])
-            st.write(f"Estimated price impact for +100 bps move: {shock:.2f}%")
+        _render_fixed_income_detail_card(row, detail_symbol)
 
     st.divider()
-    if status_text:
-        st.caption(status_text)
-    if telemetry_text:
-        st.caption(telemetry_text)
 
 
 def _show_portfolio_simulator_tab() -> None:
