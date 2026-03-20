@@ -755,6 +755,26 @@ def _render_stock_ticker_detail_card(d: pd.Series, ticker: str) -> None:
             font-size: 0.95rem;
             white-space: nowrap;
         }}
+        .stock-detail-badge-wrap {{
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .stock-detail-badge-info {{
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: var(--text);
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            cursor: help;
+            user-select: none;
+        }}
         .stock-detail-price {{
             margin-top: 10px;
             font-size: 2.6rem;
@@ -775,8 +795,55 @@ def _render_stock_ticker_detail_card(d: pd.Series, ticker: str) -> None:
             font-size: 0.95rem;
             font-weight: 700;
             letter-spacing: 0.5px;
-            text-transform: uppercase;
             margin-bottom: 8px;
+        }}
+        .stock-detail-info {{
+            display: inline-block;
+            margin-left: 8px;
+            width: 18px;
+            height: 18px;
+            line-height: 18px;
+            border-radius: 999px;
+            text-align: center;
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: var(--text);
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            cursor: help;
+            vertical-align: middle;
+        }}
+        .stock-detail-tip {{
+            position: relative;
+        }}
+        .stock-detail-tip:hover::after {{
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 0;
+            bottom: calc(100% + 10px);
+            background: #0a1324;
+            color: #e8f1ff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 10px;
+            width: min(320px, calc(100vw - 32px));
+            white-space: normal;
+            text-align: left;
+            line-height: 1.35;
+            font-size: 0.82rem;
+            font-weight: 500;
+            overflow-wrap: break-word;
+            z-index: 9999;
+            box-shadow: var(--shadow);
+            pointer-events: none;
+        }}
+        .stock-detail-tip-right:hover::after {{
+            left: auto;
+            right: 0;
+        }}
+        .stock-detail-tip-below:hover::after {{
+            bottom: auto;
+            top: calc(100% + 10px);
         }}
         .stock-detail-grid {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }}
         .stock-detail-grid.two {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
@@ -816,7 +883,10 @@ def _render_stock_ticker_detail_card(d: pd.Series, ticker: str) -> None:
                     <div class="stock-detail-title">{html.escape(company)}</div>
                     <div class="stock-detail-sub">{html.escape(str(ticker).upper())} - {html.escape(sector)}</div>
                 </div>
-                <div class="stock-detail-badge">{html.escape(quality_tier)}</div>
+                <div class="stock-detail-badge-wrap">
+                    <span class="stock-detail-badge-info stock-detail-tip stock-detail-tip-right stock-detail-tip-below" data-tooltip="Quality Tier is derived from the Quality Score (0-100), a weighted composite of percentile-ranked Revenue Growth, EBITDA Margin, ROE, Free Cash Flow Margin, Volatility Stability, and Drawdown Stability. Tier cutoffs: Strong (>=67), Neutral (34-66), Weak (<34).">i</span>
+                    <div class="stock-detail-badge">{html.escape(quality_tier)}</div>
+                </div>
             </div>
             <div class="stock-detail-price">
                 {_fmt_money(d.get("Close"), 2)}
@@ -842,7 +912,9 @@ def _render_stock_ticker_detail_card(d: pd.Series, ticker: str) -> None:
                 <div class="stock-detail-chip"><div class="k">ROE</div><div class="v">{_fmt_pct(d.get("ROE"), 2, 100.0)}</div></div>
             </div>
             <div class="stock-detail-divider"></div>
-            <div class="stock-detail-section-title">Quality</div>
+            <div class="stock-detail-section-title">Quality
+                <span class="stock-detail-info stock-detail-tip" data-tooltip="Quality Score is a 0-100 composite based on percentile-ranked Revenue Growth, EBITDA Margin, ROE, Free Cash Flow Margin, Volatility Stability, and Drawdown Stability. Higher scores indicate stronger relative quality within the screened universe.">i</span>
+            </div>
             <div class="stock-quality-row">
                 <div class="stock-quality-bar-wrap"><div class="stock-quality-bar"></div></div>
                 <div class="stock-quality-score">{quality_score_txt}</div>
