@@ -7,6 +7,7 @@ import textwrap
 from pathlib import Path
 
 import altair as alt
+import numpy as np
 import pandas as pd
 import streamlit as st
 try:
@@ -474,6 +475,264 @@ def _apply_premium_theme() -> None:
             display: inline-block;
             margin-right: 10px;
             color: #cfe2ff;
+        }
+
+        .diw-wrap {
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: linear-gradient(180deg, rgba(12, 27, 50, 0.96), rgba(12, 27, 50, 0.90));
+            padding: 14px 16px;
+            box-shadow: var(--shadow);
+            margin-bottom: 12px;
+        }
+        .diw-kicker {
+            color: #95aacd;
+            font-size: 0.86rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            font-weight: 700;
+            margin-bottom: 2px;
+        }
+        .diw-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        .diw-title {
+            font-size: 2rem;
+            font-weight: 800;
+            line-height: 1.1;
+            color: #e8f1ff;
+        }
+        .diw-sub {
+            color: #9db3d6;
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+        .diw-live {
+            color: #9bd8cb;
+            font-size: 1rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .diw-cards {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 4px;
+        }
+        .diw-card {
+            border: 1px solid rgba(135, 162, 196, 0.26);
+            border-radius: 14px;
+            background: rgba(10, 22, 41, 0.55);
+            padding: 12px 14px;
+            position: relative;
+            min-height: 118px;
+        }
+        .diw-card-blue::before,
+        .diw-card-amber::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0;
+            right: 0;
+            height: 3px;
+            border-top-left-radius: 14px;
+            border-top-right-radius: 14px;
+            background: linear-gradient(90deg, #2ec5ff, #1e8dff);
+        }
+        .diw-card-amber::before {
+            background: linear-gradient(90deg, #ffb549, #ff9f43);
+        }
+        .diw-card-k {
+            color: #9fb5d7;
+            font-size: 0.98rem;
+            margin-bottom: 2px;
+        }
+        .diw-card-v {
+            font-size: 2.05rem;
+            font-weight: 800;
+            line-height: 1.1;
+            color: #f1f6ff;
+        }
+        .diw-card-note {
+            color: #c6d8f3;
+            font-size: 0.95rem;
+            margin-top: 2px;
+        }
+        .diw-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 8px;
+            padding: 3px 10px;
+            border-radius: 999px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #d9e8ff;
+            border: 1px solid rgba(80, 122, 170, 0.45);
+            background: rgba(33, 68, 112, 0.42);
+        }
+        .diw-chip-risk {
+            color: #ffd89d;
+            border-color: rgba(255, 181, 73, 0.5);
+            background: rgba(255, 166, 52, 0.18);
+        }
+        .diw-section-title {
+            color: #95aacd;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            font-size: 1.05rem;
+            font-weight: 800;
+            margin: 16px 0 8px 0;
+        }
+        .diw-breakdown {
+            border: 1px solid rgba(135, 162, 196, 0.26);
+            border-radius: 14px;
+            background: rgba(10, 22, 41, 0.55);
+            padding: 12px 14px;
+            display: grid;
+            grid-template-columns: 110px 1fr;
+            gap: 8px 14px;
+            align-items: start;
+        }
+        .diw-big {
+            font-size: 2.05rem;
+            font-weight: 800;
+            line-height: 1.1;
+        }
+        .diw-muted {
+            color: #9db3d6;
+            font-size: 0.95rem;
+        }
+        .diw-rows {
+            margin-top: 8px;
+        }
+        .diw-row {
+            display: grid;
+            grid-template-columns: 86px 1fr 40px 42px;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 7px;
+        }
+        .diw-name-strong { color: #35d39f; font-weight: 700; }
+        .diw-name-neutral { color: #63b1ff; font-weight: 700; }
+        .diw-name-weak { color: #ff6a6a; font-weight: 700; }
+        .diw-track {
+            height: 8px;
+            background: rgba(132, 154, 184, 0.26);
+            border-radius: 999px;
+            overflow: hidden;
+        }
+        .diw-fill-strong { height: 100%; background: linear-gradient(90deg, #2ed39f, #1dbf8f); }
+        .diw-fill-neutral { height: 100%; background: linear-gradient(90deg, #65b6ff, #3f99f3); }
+        .diw-fill-weak { height: 100%; background: linear-gradient(90deg, #ff7676, #ff5252); }
+        .diw-right-num {
+            text-align: right;
+            color: #d9e6fb;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+        }
+        .diw-changed {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+        .diw-change-card {
+            border: 1px solid rgba(135, 162, 196, 0.26);
+            border-radius: 14px;
+            background: rgba(10, 22, 41, 0.55);
+            padding: 12px 14px;
+            min-height: 150px;
+        }
+        .diw-change-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            margin-bottom: 8px;
+            color: #e8f1ff;
+            border: 1px solid rgba(155, 177, 206, 0.35);
+        }
+        .diw-icon-blue { background: rgba(62, 122, 196, 0.42); }
+        .diw-icon-amber { background: rgba(255, 166, 52, 0.24); color: #ffd89d; }
+        .diw-change-title {
+            font-size: 1.75rem;
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 4px;
+        }
+        .diw-change-copy {
+            color: #d4e2f9;
+            font-size: 1.05rem;
+            line-height: 1.35;
+            min-height: 58px;
+        }
+        .diw-change-foot {
+            margin-top: 8px;
+            color: #9fb5d7;
+            font-size: 0.98rem;
+            font-weight: 700;
+        }
+        .diw-up {
+            color: #ff9aa0;
+            font-weight: 800;
+            letter-spacing: 0.01em;
+        }
+        .diw-approach {
+            border: 1px solid rgba(135, 162, 196, 0.26);
+            border-radius: 14px;
+            background: rgba(10, 22, 41, 0.55);
+            padding: 12px 14px;
+        }
+        .diw-item {
+            display: grid;
+            grid-template-columns: 38px 1fr;
+            gap: 10px;
+            align-items: start;
+            padding: 9px 0;
+            border-bottom: 1px solid rgba(135, 162, 196, 0.20);
+        }
+        .diw-item:last-child {
+            border-bottom: none;
+        }
+        .diw-item-icon {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            border: 1px solid rgba(150, 173, 204, 0.32);
+        }
+        .diw-icon-a { background: rgba(56, 110, 188, 0.42); color: #d4e5ff; }
+        .diw-icon-b { background: rgba(177, 141, 23, 0.30); color: #fff0c2; }
+        .diw-icon-c { background: rgba(48, 61, 52, 0.55); color: #bcf1bc; }
+        .diw-item-title {
+            font-size: 1.9rem;
+            line-height: 1.1;
+            font-weight: 800;
+            margin-bottom: 2px;
+            color: #ecf3ff;
+        }
+        .diw-item-copy {
+            color: #b7cae8;
+            font-size: 1.02rem;
+            line-height: 1.3;
+        }
+        @media (max-width: 980px) {
+            .diw-cards, .diw-changed {
+                grid-template-columns: 1fr;
+            }
+            .diw-breakdown {
+                grid-template-columns: 1fr;
+            }
         }
         </style>
         """,
@@ -2390,30 +2649,231 @@ def _show_portfolio_simulator_tab() -> None:
 
 
 def _show_decision_intelligence_tab() -> None:
-    st.markdown("## Decision Intelligence")
-    st.caption("Artifacts are read from cache generated by the scheduled pipeline.")
-
     quality_df, _qerr = read_parquet_safe(QUALITY_CACHE_PATH)
     regime_df, _rerr = read_parquet_safe(REGIME_CACHE_PATH)
     risk_df, _risk_err = read_parquet_safe(RISK_CACHE_PATH)
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Quality Rows", int(len(quality_df)) if quality_df is not None else 0)
-    with c2:
-        latest_regime = "Unknown"
-        if regime_df is not None and not regime_df.empty and "RegimeLabel" in regime_df.columns:
-            latest_regime = str(regime_df.iloc[-1]["RegimeLabel"])
-        st.metric("Latest Regime", latest_regime)
-    with c3:
-        latest_risk = "Unknown"
-        if risk_df is not None and not risk_df.empty and "RiskLevel" in risk_df.columns:
-            latest_risk = str(risk_df.iloc[-1]["RiskLevel"])
-        st.metric("Latest Risk", latest_risk)
-
     if quality_df is None and regime_df is None and risk_df is None:
         st.warning("Model artifacts not found. Run pipeline with run_models=True.")
         return
+
+    latest_regime = "Unknown"
+    latest_regime_conf = float("nan")
+    latest_regime_date = pd.NaT
+    if regime_df is not None and not regime_df.empty and {"Date", "RegimeLabel"}.issubset(set(regime_df.columns)):
+        rtmp = regime_df.copy()
+        rtmp["Date"] = pd.to_datetime(rtmp["Date"], errors="coerce")
+        if "ConfidenceScore" in rtmp.columns:
+            rtmp["ConfidenceScore"] = pd.to_numeric(rtmp["ConfidenceScore"], errors="coerce")
+        rtmp = rtmp.dropna(subset=["Date"]).sort_values("Date")
+        if not rtmp.empty:
+            last = rtmp.iloc[-1]
+            latest_regime = str(last.get("RegimeLabel", "Unknown"))
+            latest_regime_conf = float(last.get("ConfidenceScore")) if pd.notna(last.get("ConfidenceScore")) else float("nan")
+            latest_regime_date = pd.to_datetime(last.get("Date"), errors="coerce")
+
+    latest_risk = "Unknown"
+    latest_risk_score = float("nan")
+    latest_risk_date = pd.NaT
+    risk_delta = float("nan")
+    risk_week_base = float("nan")
+    if risk_df is not None and not risk_df.empty and {"Date", "RiskLevel"}.issubset(set(risk_df.columns)):
+        ktmp = risk_df.copy()
+        ktmp["Date"] = pd.to_datetime(ktmp["Date"], errors="coerce")
+        if "RiskScore" in ktmp.columns:
+            ktmp["RiskScore"] = pd.to_numeric(ktmp["RiskScore"], errors="coerce")
+        ktmp = ktmp.dropna(subset=["Date"]).sort_values("Date")
+        if not ktmp.empty:
+            last = ktmp.iloc[-1]
+            latest_risk = str(last.get("RiskLevel", "Unknown"))
+            latest_risk_score = float(last.get("RiskScore")) if pd.notna(last.get("RiskScore")) else float("nan")
+            latest_risk_date = pd.to_datetime(last.get("Date"), errors="coerce")
+            if len(ktmp) >= 2 and np.isfinite(latest_risk_score):
+                win_start = ktmp["Date"].max() - pd.Timedelta(days=7)
+                base = ktmp[ktmp["Date"] <= win_start]
+                if base.empty:
+                    base = ktmp.head(1)
+                risk_week_base = float(base.iloc[-1].get("RiskScore")) if pd.notna(base.iloc[-1].get("RiskScore")) else float("nan")
+                if np.isfinite(risk_week_base):
+                    risk_delta = float(latest_risk_score - risk_week_base)
+
+    stocks_tracked = int(len(quality_df)) if quality_df is not None else 0
+    strong = neutral = weak = 0
+    if quality_df is not None and not quality_df.empty and "QualityTier" in quality_df.columns:
+        counts = quality_df["QualityTier"].astype(str).value_counts()
+        strong = int(counts.get("Strong", 0))
+        neutral = int(counts.get("Neutral", 0))
+        weak = int(counts.get("Weak", 0))
+    total = max(stocks_tracked, strong + neutral + weak, 1)
+    p_strong = int(round(100 * strong / total))
+    p_neutral = int(round(100 * neutral / total))
+    p_weak = int(round(100 * weak / total))
+
+    r_week_change = "No big shifts in either direction."
+    r_week_footer = "unchanged over 7 days"
+    if regime_df is not None and not regime_df.empty and {"Date", "RegimeLabel"}.issubset(set(regime_df.columns)):
+        rw = regime_df.copy()
+        rw["Date"] = pd.to_datetime(rw["Date"], errors="coerce")
+        rw = rw.dropna(subset=["Date"]).sort_values("Date")
+        if not rw.empty:
+            win_start = rw["Date"].max() - pd.Timedelta(days=7)
+            ws = rw[rw["Date"] >= win_start]
+            if len(ws) >= 2:
+                first_lbl = str(ws.iloc[0]["RegimeLabel"])
+                last_lbl = str(ws.iloc[-1]["RegimeLabel"])
+                if first_lbl != last_lbl:
+                    r_week_change = f"Shifted from {first_lbl} to {last_lbl}."
+                    r_week_footer = "changed over 7 days"
+                else:
+                    r_week_change = f"No change — still {last_lbl}. No big shifts in either direction."
+
+    risk_week_change = "Risk trend unavailable."
+    risk_week_footer = "insufficient weekly history"
+    if np.isfinite(risk_delta) and np.isfinite(latest_risk_score):
+        if risk_delta > 0:
+            risk_week_change = f"Risk ticked up slightly. Still in {latest_risk} territory — worth watching."
+        elif risk_delta < 0:
+            risk_week_change = f"Risk eased a bit. Still in {latest_risk} territory."
+        else:
+            risk_week_change = f"Risk stayed steady in {latest_risk} territory."
+        sign = "+" if risk_delta >= 0 else "-"
+        risk_week_footer = f"{sign}{abs(risk_delta):.1f} pts  ·  now {latest_risk_score:.1f}"
+
+    conf_chip = "No strong trend"
+    if np.isfinite(latest_regime_conf):
+        conf_chip = "Confidence moderate" if float(latest_regime_conf) < 0.60 else "Confidence higher"
+
+    approach_items = [
+        (
+            "A",
+            "Stay balanced — don't over-concentrate in one stock or sector",
+            "Keep your portfolio spread out and size new positions carefully.",
+        ),
+        (
+            "B",
+            "Use this as context, not a final call",
+            "Confidence is moderate — combine with your own research and time horizon.",
+        ),
+        (
+            "C",
+            "Pair with fundamentals and valuation before acting",
+            "This signal works best as one layer of a broader decision, not a standalone trigger.",
+        ),
+    ]
+
+    as_of = latest_regime_date if pd.notna(latest_regime_date) else latest_risk_date
+    as_of_txt = as_of.strftime("%B %d, %Y") if pd.notna(as_of) else "latest available date"
+    risk_score_txt = f"{latest_risk_score:.1f} / 100" if np.isfinite(latest_risk_score) else "score unavailable"
+
+    snapshot_html = f"""
+    <div class="diw-wrap">
+      <div class="diw-head">
+        <div>
+          <div class="diw-kicker">Decision Intelligence</div>
+          <div class="diw-title">Market Snapshot</div>
+          <div class="diw-sub">As of {html.escape(as_of_txt)}</div>
+        </div>
+        <div class="diw-live">Live</div>
+      </div>
+      <div class="diw-cards">
+        <div class="diw-card diw-card-blue">
+          <div class="diw-card-k">Stocks tracked</div>
+          <div class="diw-card-v">{stocks_tracked}</div>
+          <div class="diw-card-note">across the universe</div>
+        </div>
+        <div class="diw-card diw-card-blue">
+          <div class="diw-card-k">Market mood</div>
+          <div class="diw-card-v">{html.escape(latest_regime)}</div>
+          <div class="diw-chip">{html.escape(conf_chip)}</div>
+        </div>
+        <div class="diw-card diw-card-amber">
+          <div class="diw-card-k">System risk</div>
+          <div class="diw-card-v">{html.escape(latest_risk)}</div>
+          <div class="diw-chip diw-chip-risk">Score {html.escape(risk_score_txt)}</div>
+        </div>
+      </div>
+      <div class="diw-section-title">Stock Quality Breakdown</div>
+      <div class="diw-breakdown">
+        <div>
+          <div class="diw-big">{stocks_tracked}</div>
+          <div class="diw-muted">stocks</div>
+        </div>
+        <div>
+          <div class="diw-muted">How many stocks are in good, average, or poor shape?</div>
+          <div class="diw-rows">
+            <div class="diw-row">
+              <div class="diw-name-strong">Strong</div>
+              <div class="diw-track"><div class="diw-fill-strong" style="width:{max(p_strong, 2)}%;"></div></div>
+              <div class="diw-right-num">{strong}</div>
+              <div class="diw-right-num">{p_strong}%</div>
+            </div>
+            <div class="diw-row">
+              <div class="diw-name-neutral">Neutral</div>
+              <div class="diw-track"><div class="diw-fill-neutral" style="width:{max(p_neutral, 2)}%;"></div></div>
+              <div class="diw-right-num">{neutral}</div>
+              <div class="diw-right-num">{p_neutral}%</div>
+            </div>
+            <div class="diw-row">
+              <div class="diw-name-weak">Weak</div>
+              <div class="diw-track"><div class="diw-fill-weak" style="width:{max(p_weak, 2)}%;"></div></div>
+              <div class="diw-right-num">{weak}</div>
+              <div class="diw-right-num">{p_weak}%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="diw-section-title">What Changed This Week</div>
+      <div class="diw-changed">
+        <div class="diw-change-card">
+          <div class="diw-change-icon diw-icon-blue">M</div>
+          <div class="diw-change-title">Market mood</div>
+          <div class="diw-change-copy">{html.escape(r_week_change)}</div>
+          <div class="diw-change-foot">- {html.escape(r_week_footer)}</div>
+        </div>
+        <div class="diw-change-card">
+          <div class="diw-change-icon diw-icon-amber">R</div>
+          <div class="diw-change-title">Risk level</div>
+          <div class="diw-change-copy">{html.escape(risk_week_change)}</div>
+          <div class="diw-change-foot {'diw-up' if np.isfinite(risk_delta) else ''}">{html.escape(risk_week_footer)}</div>
+        </div>
+      </div>
+      <div class="diw-section-title">Suggested Approach</div>
+      <div class="diw-approach">
+        <div class="diw-item">
+          <div class="diw-item-icon diw-icon-a">{approach_items[0][0]}</div>
+          <div>
+            <div class="diw-item-title">{html.escape(approach_items[0][1])}</div>
+            <div class="diw-item-copy">{html.escape(approach_items[0][2])}</div>
+          </div>
+        </div>
+        <div class="diw-item">
+          <div class="diw-item-icon diw-icon-b">{approach_items[1][0]}</div>
+          <div>
+            <div class="diw-item-title">{html.escape(approach_items[1][1])}</div>
+            <div class="diw-item-copy">{html.escape(approach_items[1][2])}</div>
+          </div>
+        </div>
+        <div class="diw-item">
+          <div class="diw-item-icon diw-icon-c">{approach_items[2][0]}</div>
+          <div>
+            <div class="diw-item-title">{html.escape(approach_items[2][1])}</div>
+            <div class="diw-item-copy">{html.escape(approach_items[2][2])}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+    st.markdown(snapshot_html, unsafe_allow_html=True)
+    st.caption("For model diagnostics and technical health tables, use the Diagnostics tab.")
+
+
+def _show_diagnostics_tab() -> None:
+    st.markdown("## Diagnostics")
+    st.caption("Technical model diagnostics and cache-health details.")
+
+    quality_df, _qerr = read_parquet_safe(QUALITY_CACHE_PATH)
+    regime_df, _rerr = read_parquet_safe(REGIME_CACHE_PATH)
+    risk_df, _risk_err = read_parquet_safe(RISK_CACHE_PATH)
 
     if quality_df is not None and not quality_df.empty:
         st.markdown("#### Quality Score Distribution")
@@ -2428,10 +2888,7 @@ def _show_decision_intelligence_tab() -> None:
             )
             dist = bins.value_counts().sort_index().reset_index()
             dist.columns = ["Bucket", "Count"]
-            st.bar_chart(dist.set_index("Bucket"))
-        st.markdown("#### Top Quality Entities")
-        top_q = quality_df.sort_values("QualityScore", ascending=False).head(30)
-        _render_sortable_centered_table(top_q, ["QualityScore", "QualityTier"])
+            _render_sortable_centered_table(dist, ["Count"])
 
     if regime_df is not None and not regime_df.empty and {"Date", "RegimeLabel", "ConfidenceScore"}.issubset(set(regime_df.columns)):
         st.markdown("#### Regime Timeline")
@@ -3206,7 +3663,7 @@ def _show_monitoring_tab() -> None:
 
 _show_signal_banner()
 
-stock_tab, fi_tab, sim_tab, di_tab, ex_tab, un_tab, mon_tab = st.tabs(
+stock_tab, fi_tab, sim_tab, di_tab, ex_tab, un_tab, mon_tab, dx_tab = st.tabs(
     [
         "Stock Screener",
         "Bond & Treasury Screener",
@@ -3215,6 +3672,7 @@ stock_tab, fi_tab, sim_tab, di_tab, ex_tab, un_tab, mon_tab = st.tabs(
         "Explainability and Evidence",
         "Uncertainty and Confidence",
         "Drift, Monitoring, and Early Warning",
+        "Diagnostics",
     ]
 )
 with stock_tab:
@@ -3231,4 +3689,6 @@ with un_tab:
     _show_uncertainty_tab()
 with mon_tab:
     _show_monitoring_tab()
+with dx_tab:
+    _show_diagnostics_tab()
 
