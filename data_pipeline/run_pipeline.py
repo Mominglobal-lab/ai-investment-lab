@@ -553,7 +553,11 @@ def run_decision_models_pipeline(
 
     fund_status = get_cache_status(fundamentals_path, 365, required_columns=["Ticker"])
     prices_status = get_cache_status(prices_path, 365, required_columns=["Ticker", "Date", "AdjClose"])
-    treasury_status = get_cache_status(treasury_path, 365, required_columns=[])
+    treasury_status = get_cache_status(treasury_path, 365, required_columns=["Date", "10Y", "2Y", "3M"])
+    treasury_rows = 0
+    treasury_df, _terr = read_parquet_safe(treasury_path)
+    if treasury_df is not None:
+        treasury_rows = int(len(treasury_df))
     health = {
         "generated_at": now,
         "model_freshness": {
@@ -564,7 +568,11 @@ def run_decision_models_pipeline(
         "input_cache_coverage": {
             "fundamentals_cache": {"exists": fund_status.exists, "schema_ok": fund_status.schema_ok},
             "prices_cache": {"exists": prices_status.exists, "schema_ok": prices_status.schema_ok},
-            "treasury_yields_cache": {"exists": treasury_status.exists},
+            "treasury_yields_cache": {
+                "exists": treasury_status.exists,
+                "schema_ok": treasury_status.schema_ok,
+                "row_count": treasury_rows,
+            },
         },
         "missing_data_warnings": feature_result.warnings,
         "feature_availability_indicators": feature_result.input_coverage,

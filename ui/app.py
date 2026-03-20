@@ -20,6 +20,7 @@ except Exception:
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+DATA_DIR = ROOT / "data"
 
 from data_pipeline.cache_manager import get_cache_status, read_parquet_safe
 from data_pipeline.data_fetcher import FI_SCHEMA_COLUMNS, SCHEMA_COLUMNS
@@ -30,26 +31,40 @@ st.set_page_config(page_title="Investment Lab", layout="wide")
 
 STOCK_UNIVERSE_OPTIONS = ["S&P 500", "Nasdaq 100"]
 FI_UNIVERSE_OPTIONS = ["US Treasuries", "Bond ETFs"]
-SIM_BENCHMARK_OPTIONS = ["SPY", "QQQ", "IWM", "DIA"]
+SIM_BENCHMARK_OPTIONS = ["SPY", "QQQ", "DIA", "IWM"]
 MAX_AGE_DAYS = 7
 MIN_REFRESH_SUCCESS_RATIO = 0.25
 PRICE_SCHEMA_COLUMNS = ["Ticker", "Date", "AdjClose", "Close", "Volume"]
-PRICES_CACHE_PATH = "data/prices_cache.parquet"
-PRICES_HEALTH_PATH = "data/prices_health_report.json"
-QUALITY_CACHE_PATH = "data/quality_scores_cache.parquet"
-REGIME_CACHE_PATH = "data/regime_cache.parquet"
-RISK_CACHE_PATH = "data/risk_signals_cache.parquet"
-QUALITY_EXPLAIN_PATH = "data/quality_explanations_cache.parquet"
-REGIME_EVIDENCE_PATH = "data/regime_evidence_cache.parquet"
-RISK_EVIDENCE_PATH = "data/risk_evidence_cache.parquet"
-QUALITY_UNCERTAINTY_PATH = "data/quality_uncertainty_cache.parquet"
-REGIME_PROB_PATH = "data/regime_probabilities_cache.parquet"
-RISK_UNCERTAINTY_PATH = "data/risk_uncertainty_cache.parquet"
-DRIFT_SIGNALS_PATH = "data/drift_signals_cache.parquet"
-DRIFT_SIGNALS_HISTORY_PATH = "data/drift_signals_history.parquet"
-DRIFT_REPORT_PATH = "data/drift_report.json"
-ALERT_LOG_PATH = "data/alert_log.parquet"
-MONITORING_HEALTH_PATH = "data/monitoring_health_report.json"
+PRICES_CACHE_PATH = str(DATA_DIR / "prices_cache.parquet")
+PRICES_HEALTH_PATH = str(DATA_DIR / "prices_health_report.json")
+QUALITY_CACHE_PATH = str(DATA_DIR / "quality_scores_cache.parquet")
+REGIME_CACHE_PATH = str(DATA_DIR / "regime_cache.parquet")
+RISK_CACHE_PATH = str(DATA_DIR / "risk_signals_cache.parquet")
+QUALITY_EXPLAIN_PATH = str(DATA_DIR / "quality_explanations_cache.parquet")
+REGIME_EVIDENCE_PATH = str(DATA_DIR / "regime_evidence_cache.parquet")
+RISK_EVIDENCE_PATH = str(DATA_DIR / "risk_evidence_cache.parquet")
+QUALITY_UNCERTAINTY_PATH = str(DATA_DIR / "quality_uncertainty_cache.parquet")
+REGIME_PROB_PATH = str(DATA_DIR / "regime_probabilities_cache.parquet")
+RISK_UNCERTAINTY_PATH = str(DATA_DIR / "risk_uncertainty_cache.parquet")
+DRIFT_SIGNALS_PATH = str(DATA_DIR / "drift_signals_cache.parquet")
+DRIFT_SIGNALS_HISTORY_PATH = str(DATA_DIR / "drift_signals_history.parquet")
+DRIFT_REPORT_PATH = str(DATA_DIR / "drift_report.json")
+ALERT_LOG_PATH = str(DATA_DIR / "alert_log.parquet")
+MONITORING_HEALTH_PATH = str(DATA_DIR / "monitoring_health_report.json")
+FUNDAMENTALS_CACHE_PATH = str(DATA_DIR / "fundamentals_cache.parquet")
+FUNDAMENTALS_CACHE_SP500_PATH = str(DATA_DIR / "fundamentals_cache_sp500.parquet")
+FUNDAMENTALS_CACHE_NASDAQ100_PATH = str(DATA_DIR / "fundamentals_cache_nasdaq100.parquet")
+FUNDAMENTALS_HEALTH_PATH = str(DATA_DIR / "fundamentals_health_report.json")
+FUNDAMENTALS_HEALTH_SP500_PATH = str(DATA_DIR / "fundamentals_health_report_sp500.json")
+FUNDAMENTALS_HEALTH_NASDAQ100_PATH = str(DATA_DIR / "fundamentals_health_report_nasdaq100.json")
+FIXED_INCOME_CACHE_TREASURY_PATH = str(DATA_DIR / "fixed_income_cache_treasury.parquet")
+FIXED_INCOME_CACHE_BOND_ETF_PATH = str(DATA_DIR / "fixed_income_cache_bond_etf.parquet")
+FIXED_INCOME_HEALTH_TREASURY_PATH = str(DATA_DIR / "fixed_income_health_treasury.json")
+FIXED_INCOME_HEALTH_BOND_ETF_PATH = str(DATA_DIR / "fixed_income_health_bond_etf.json")
+TREASURY_YIELDS_CACHE_PATH = str(DATA_DIR / "treasury_yields_cache.parquet")
+MODEL_REGISTRY_PATH = str(DATA_DIR / "model_registry.json")
+MODEL_HEALTH_PATH = str(DATA_DIR / "model_health_report.json")
+RUN_ARTIFACTS_DIR = str(DATA_DIR / "run_artifacts")
 
 
 def _apply_premium_theme() -> None:
@@ -391,16 +406,74 @@ def _apply_premium_theme() -> None:
             color: #e8f1ff;
             font-size: 1.05rem;
         }
+        .ii-insights-hdr {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .ii-insights-hdr h4 {
+            margin: 0;
+        }
+        .ii-insights-info {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: var(--text);
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            cursor: help;
+            user-select: none;
+            position: relative;
+        }
+        .ii-insights-info:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 0;
+            bottom: calc(100% + 10px);
+            width: min(430px, calc(100vw - 36px));
+            background: #0a1324;
+            color: #e8f1ff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 0.82rem;
+            line-height: 1.35;
+            font-weight: 500;
+            text-align: left;
+            white-space: normal;
+            z-index: 9999;
+            pointer-events: none;
+            box-shadow: var(--shadow);
+        }
 
         .ii-insights ul {
             margin: 0;
-            padding-left: 18px;
+            padding-left: 0;
+            list-style: none;
+        }
+        .ii-insights-cols {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            column-gap: 24px;
+            row-gap: 0;
         }
 
         .ii-insights li {
             margin: 1px 0;
             line-height: 1.2;
             color: #dce9ff;
+        }
+        .ii-insights li::before {
+            content: "\\2022";
+            display: inline-block;
+            margin-right: 10px;
+            color: #cfe2ff;
         }
         </style>
         """,
@@ -414,26 +487,26 @@ _apply_premium_theme()
 def _stock_paths(universe: str) -> tuple[str, str]:
     key = (universe or "").strip().lower().replace("&", "and").replace(" ", "").replace("-", "")
     if key in {"sandp500", "sp500"}:
-        return "data/fundamentals_cache_sp500.parquet", "data/fundamentals_health_report_sp500.json"
+        return FUNDAMENTALS_CACHE_SP500_PATH, FUNDAMENTALS_HEALTH_SP500_PATH
     if key in {"nasdaq100", "ndx"}:
-        return "data/fundamentals_cache_nasdaq100.parquet", "data/fundamentals_health_report_nasdaq100.json"
+        return FUNDAMENTALS_CACHE_NASDAQ100_PATH, FUNDAMENTALS_HEALTH_NASDAQ100_PATH
     raise ValueError(f"Unsupported stock universe: {universe}")
 
 
 def _fi_paths(universe: str) -> tuple[str, str]:
     key = (universe or "").strip().lower().replace(" ", "").replace("-", "")
     if key in {"ustreasuries", "treasury", "treasuries"}:
-        return "data/fixed_income_cache_treasury.parquet", "data/fixed_income_health_treasury.json"
+        return FIXED_INCOME_CACHE_TREASURY_PATH, FIXED_INCOME_HEALTH_TREASURY_PATH
     if key in {"bondetfs", "bondetf", "etf"}:
-        return "data/fixed_income_cache_bond_etf.parquet", "data/fixed_income_health_bond_etf.json"
+        return FIXED_INCOME_CACHE_BOND_ETF_PATH, FIXED_INCOME_HEALTH_BOND_ETF_PATH
     raise ValueError(f"Unsupported fixed-income universe: {universe}")
 
 
 def _load_fundamentals_union() -> pd.DataFrame:
     paths = [
-        "data/fundamentals_cache.parquet",
-        "data/fundamentals_cache_sp500.parquet",
-        "data/fundamentals_cache_nasdaq100.parquet",
+        FUNDAMENTALS_CACHE_PATH,
+        FUNDAMENTALS_CACHE_SP500_PATH,
+        FUNDAMENTALS_CACHE_NASDAQ100_PATH,
     ]
     frames: list[pd.DataFrame] = []
     for p in paths:
@@ -455,9 +528,9 @@ def _load_fundamentals_union() -> pd.DataFrame:
 
 def _load_explainability_feature_union() -> pd.DataFrame:
     paths = [
-        "data/fundamentals_cache.parquet",
-        "data/fundamentals_cache_sp500.parquet",
-        "data/fundamentals_cache_nasdaq100.parquet",
+        FUNDAMENTALS_CACHE_PATH,
+        FUNDAMENTALS_CACHE_SP500_PATH,
+        FUNDAMENTALS_CACHE_NASDAQ100_PATH,
     ]
     fund_frames: list[pd.DataFrame] = []
     wanted_fund_cols = [
@@ -525,6 +598,91 @@ def _parse_ticker_input(text: str) -> list[str]:
         seen.add(t)
         out.append(t)
     return out
+
+
+def _default_sim_holdings_rows() -> list[dict[str, object]]:
+    return [
+        {"Ticker": "AAPL", "WeightPct": 25.0},
+        {"Ticker": "MSFT", "WeightPct": 25.0},
+        {"Ticker": "NVDA", "WeightPct": 25.0},
+        {"Ticker": "GOOGL", "WeightPct": 25.0},
+    ]
+
+
+def _clean_sim_holdings_rows(rows: list[dict[str, object]] | None) -> list[dict[str, object]]:
+    seen: set[str] = set()
+    out: list[dict[str, object]] = []
+    for row in rows or []:
+        ticker = str((row or {}).get("Ticker") or "").strip().upper()
+        if not ticker or ticker in seen:
+            continue
+        seen.add(ticker)
+        weight = pd.to_numeric(pd.Series([(row or {}).get("WeightPct")]), errors="coerce").iloc[0]
+        weight_pct = 0.0 if pd.isna(weight) else float(weight)
+        out.append({"Ticker": ticker, "WeightPct": weight_pct})
+    return out
+
+
+def _sim_rows_to_inputs(rows: list[dict[str, object]]) -> tuple[str, str, float]:
+    clean = _clean_sim_holdings_rows(rows)
+    tickers = [str(r["Ticker"]) for r in clean]
+    weights_pct = [float(r["WeightPct"]) for r in clean]
+    ticker_text = ", ".join(tickers)
+    manual_weights_text = ", ".join([f"{(w / 100.0):.6f}" for w in weights_pct])
+    total_pct = float(sum(weights_pct))
+    return ticker_text, manual_weights_text, total_pct
+
+
+def _auto_risk_free_rate_pct(*, treasury_path: str = TREASURY_YIELDS_CACHE_PATH) -> tuple[float, str]:
+    fallback = 4.0
+    candidate_paths: list[str] = [treasury_path]
+    tpath = Path(treasury_path)
+    if not tpath.is_absolute():
+        candidate_paths.append(str((ROOT / tpath).resolve()))
+
+    tdf = None
+    _err = None
+    for p in candidate_paths:
+        tdf, _err = read_parquet_safe(p)
+        if tdf is not None and not tdf.empty:
+            break
+    if tdf is None or tdf.empty:
+        return fallback, "Fallback default (treasury cache unavailable)"
+
+    cols = list(tdf.columns)
+    canon = {str(c).lower().replace("_", "").replace(" ", ""): c for c in cols}
+
+    def _pick(candidates: list[str]) -> str | None:
+        for c in candidates:
+            key = c.lower().replace("_", "").replace(" ", "")
+            if key in canon:
+                return canon[key]
+        return None
+
+    date_col = _pick(["Date", "AsOfDate", "Timestamp"])
+    y3m_col = _pick(["3M", "DGS3MO", "Yield3M", "UST3M"])
+    y2_col = _pick(["2Y", "DGS2", "Yield2Y", "UST2Y"])
+    y10_col = _pick(["10Y", "DGS10", "Yield10Y", "UST10Y"])
+    chosen_col = y3m_col or y2_col or y10_col
+    chosen_lbl = "3M" if chosen_col == y3m_col else ("2Y" if chosen_col == y2_col else ("10Y" if chosen_col == y10_col else "N/A"))
+    if chosen_col is None:
+        return fallback, "Fallback default (no treasury yield column found)"
+
+    tmp = tdf.copy()
+    if date_col is not None:
+        tmp["_date"] = pd.to_datetime(tmp[date_col], errors="coerce")
+        tmp = tmp.sort_values("_date")
+    tmp["_yield"] = pd.to_numeric(tmp[chosen_col], errors="coerce")
+    ser = tmp["_yield"].dropna()
+    if ser.empty:
+        return fallback, f"Fallback default ({chosen_lbl} yield unavailable)"
+
+    val = float(ser.iloc[-1])
+    if 0.0 <= val <= 1.0:
+        val *= 100.0
+    if not (-5.0 <= val <= 25.0):
+        return fallback, f"Fallback default ({chosen_lbl} yield out of range)"
+    return val, f"Auto from treasury {chosen_lbl} yield"
 
 
 def _build_holdings(
@@ -884,7 +1042,7 @@ def _render_stock_ticker_detail_card(d: pd.Series, ticker: str) -> None:
                     <div class="stock-detail-sub">{html.escape(str(ticker).upper())} - {html.escape(sector)}</div>
                 </div>
                 <div class="stock-detail-badge-wrap">
-                    <span class="stock-detail-badge-info stock-detail-tip stock-detail-tip-right stock-detail-tip-below" data-tooltip="Quality Tier is derived from the Quality Score (0-100), a weighted composite of percentile-ranked Revenue Growth, EBITDA Margin, ROE, Free Cash Flow Margin, Volatility Stability, and Drawdown Stability. Tier cutoffs: Strong (>=67), Neutral (34-66), Weak (<34).">i</span>
+                    <span class="stock-detail-badge-info stock-detail-tip stock-detail-tip-right stock-detail-tip-below" data-tooltip="Quality Score is a 0-100 weighted composite of percentile-ranked inputs: Revenue Growth (20%), EBITDA Margin (20%), ROE (20%), Free Cash Flow Margin (20%), Volatility Stability (10%), and Drawdown Stability (10%). Missing values are assigned a neutral percentile of 0.5. Tiers: Strong (>=67), Neutral (34-66), Weak (<34).">i</span>
                     <div class="stock-detail-badge">{html.escape(quality_tier)}</div>
                 </div>
             </div>
@@ -913,7 +1071,7 @@ def _render_stock_ticker_detail_card(d: pd.Series, ticker: str) -> None:
             </div>
             <div class="stock-detail-divider"></div>
             <div class="stock-detail-section-title">Quality
-                <span class="stock-detail-info stock-detail-tip" data-tooltip="Quality Score is a 0-100 composite based on percentile-ranked Revenue Growth, EBITDA Margin, ROE, Free Cash Flow Margin, Volatility Stability, and Drawdown Stability. Higher scores indicate stronger relative quality within the screened universe.">i</span>
+                <span class="stock-detail-info stock-detail-tip" data-tooltip="Quality Score is a 0-100 weighted composite of percentile-ranked inputs: Revenue Growth (20%), EBITDA Margin (20%), ROE (20%), Free Cash Flow Margin (20%), Volatility Stability (10%), and Drawdown Stability (10%). Missing values are assigned a neutral percentile of 0.5. Tiers: Strong (>=67), Neutral (34-66), Weak (<34).">i</span>
             </div>
             <div class="stock-quality-row">
                 <div class="stock-quality-bar-wrap"><div class="stock-quality-bar"></div></div>
@@ -1069,6 +1227,225 @@ def _render_fixed_income_detail_card(row: pd.Series, symbol: str) -> None:
         ),
         unsafe_allow_html=True,
     )
+
+
+def _render_performance_metrics_cards(summary: dict[str, object]) -> None:
+    def _num(key: str) -> float | None:
+        v = summary.get(key)
+        if isinstance(v, (int, float)):
+            return float(v)
+        return None
+
+    def _fmt_pct(value: float | None, with_plus: bool = False) -> str:
+        if value is None:
+            return "N/A"
+        out = value * 100.0
+        if with_plus and out > 0:
+            return f"+{out:.2f}%"
+        return f"{out:.2f}%"
+
+    def _fmt_num(value: float | None, decimals: int = 2) -> str:
+        if value is None:
+            return "N/A"
+        return f"{value:.{decimals}f}"
+
+    def _badge(tone: str, text: str) -> str:
+        cls = "pm-badge"
+        if tone == "high":
+            cls += " high"
+        elif tone == "moderate":
+            cls += " moderate"
+        elif tone == "stat":
+            cls += " stat"
+        else:
+            cls += " low"
+        return f'<span class="{cls}">{html.escape(text)}</span>'
+
+    vol = _num("volatility")
+    if vol is None:
+        vol_tone, vol_lbl = "low", "n/a"
+    elif vol < 0.15:
+        vol_tone, vol_lbl = "low", "low"
+    elif vol < 0.30:
+        vol_tone, vol_lbl = "moderate", "moderate"
+    else:
+        vol_tone, vol_lbl = "high", "high"
+
+    corr = _num("correlation_with_benchmark")
+    if corr is None:
+        corr_tone, corr_lbl = "low", "n/a"
+    elif corr >= 0.80:
+        corr_tone, corr_lbl = "high", "high"
+    elif corr >= 0.50:
+        corr_tone, corr_lbl = "moderate", "moderate"
+    else:
+        corr_tone, corr_lbl = "low", "low"
+
+    st.markdown("#### Performance Metrics")
+    st.markdown(
+        """
+        <style>
+        .pm-head { color: var(--muted); font-size: 0.86rem; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; margin-bottom: 10px; }
+        .pm-top-title { color: var(--text); font-size: 1.15rem; font-weight: 700; margin-bottom: 2px; }
+        .pm-top-value { color: var(--text); font-size: 2.55rem; font-weight: 900; line-height: 1.0; margin-bottom: 6px; }
+        .pm-top-value.green { color: #79cf52; }
+        .pm-top-note { color: var(--muted); font-size: 0.95rem; line-height: 1.3; }
+        .pm-top-accent { height: 6px; border-radius: 999px; background: linear-gradient(90deg, #25c5ff, #2dd4a8); margin-top: 10px; }
+        .pm-info {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: var(--text);
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            cursor: help;
+            user-select: none;
+            position: relative;
+            vertical-align: middle;
+            margin-left: 6px;
+        }
+        .pm-info:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 0;
+            bottom: calc(100% + 10px);
+            width: min(460px, calc(100vw - 36px));
+            background: #0a1324;
+            color: #e8f1ff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 0.82rem;
+            line-height: 1.35;
+            font-weight: 500;
+            text-align: left;
+            white-space: normal;
+            z-index: 9999;
+            pointer-events: none;
+            box-shadow: var(--shadow);
+        }
+        .pm-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; box-shadow: var(--shadow); margin-bottom: 14px; }
+        .pm-subhead { color: var(--muted); font-size: 0.84rem; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; margin: 8px 0 2px 0; }
+        .pm-row { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 10px 0; }
+        .pm-row + .pm-row { border-top: 1px solid var(--border); }
+        .pm-label { color: var(--text); font-size: 1.05rem; font-weight: 700; }
+        .pm-desc { color: var(--muted); font-size: 0.90rem; line-height: 1.32; margin-top: 2px; max-width: 780px; }
+        .pm-value { color: var(--text); font-size: 2.0rem; font-weight: 900; white-space: nowrap; margin-top: 2px; }
+        .pm-value.negative { color: #ff8d8d; }
+        .pm-value.subtle { font-size: 1.8rem; }
+        .pm-badge { display: inline-block; margin-left: 8px; padding: 2px 10px; border-radius: 999px; font-size: 0.82rem; font-weight: 700; }
+        .pm-badge.high { background: rgba(255, 172, 28, 0.18); color: #ffca6f; }
+        .pm-badge.moderate { background: rgba(255, 186, 70, 0.18); color: #ffd989; }
+        .pm-badge.low { background: rgba(64, 199, 129, 0.18); color: #8de3ba; }
+        .pm-badge.stat { background: rgba(80, 145, 255, 0.20); color: #9dc1ff; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="pm-head">At A Glance</div>', unsafe_allow_html=True)
+    g1, g2 = st.columns(2)
+    with g1:
+        st.markdown(
+            f'<div class="pm-top-title">Annual return (CAGR)</div><div class="pm-top-value green">{_fmt_pct(_num("CAGR"), with_plus=True)}</div><div class="pm-top-note">Average yearly growth rate</div>',
+            unsafe_allow_html=True,
+        )
+        with g2:
+            st.markdown(
+                f'<div class="pm-top-title">Risk-adjusted return</div><div class="pm-top-value">{_fmt_num(_num("Sharpe_ratio"), 2)} <span style="font-size:0.55em; font-weight:700;">Sharpe</span><span class="pm-info" data-tooltip="Sharpe ratio tells you return per unit of risk. Formula used in this app: Sharpe = (CAGR - risk_free_rate) / volatility. Here, CAGR is annualized return, risk_free_rate is the simulator baseline return (auto-filled from treasury with 4% fallback unless you change it), and volatility is annualized return variability. Higher Sharpe generally means better risk-adjusted performance.">i</span></div><div class="pm-top-note">Above 1.0 is generally considered good</div><div class="pm-top-accent"></div>',
+                unsafe_allow_html=True,
+            )
+
+    left_metrics_col, right_metrics_col = st.columns(2)
+    with left_metrics_col:
+        st.markdown('<div class="pm-head" style="margin-top:14px;">Risk - How Much Could You Lose?</div>', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="pm-panel pm-panel-equal">
+                <div class="pm-row">
+                    <div>
+                        <div class="pm-label">Volatility {_badge(vol_tone, vol_lbl)}</div>
+                        <div class="pm-desc">How much the portfolio swings up and down on a typical year. Higher means a bumpier ride.</div>
+                    </div>
+                    <div class="pm-value subtle">{_fmt_pct(vol)}</div>
+                </div>
+                <div class="pm-row">
+                    <div>
+                        <div class="pm-label">Biggest drop ever (max drawdown)</div>
+                        <div class="pm-desc">The largest peak-to-trough fall recorded. At worst, this is how far the portfolio was down.</div>
+                    </div>
+                    <div class="pm-value negative">{_fmt_pct(_num("max_drawdown"))}</div>
+                </div>
+                <div class="pm-row">
+                    <div>
+                        <div class="pm-label">Worst single day</div>
+                        <div class="pm-desc">The steepest one-day loss in the dataset.</div>
+                    </div>
+                    <div class="pm-value negative">{_fmt_pct(_num("worst_day"))}</div>
+                </div>
+                <div class="pm-row">
+                    <div>
+                        <div class="pm-label">Worst single month</div>
+                        <div class="pm-desc">The steepest one-month loss in the dataset.</div>
+                    </div>
+                    <div class="pm-value negative">{_fmt_pct(_num("worst_month"))}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with right_metrics_col:
+        st.markdown('<div class="pm-head" style="margin-top:14px;">Tail Risk - Bad Day Estimates</div>', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="pm-panel">
+                <div class="pm-row">
+                    <div>
+                        <div class="pm-label">VaR 95% {_badge("stat", "statistical")}</div>
+                        <div class="pm-desc">On a typical bad day (worst 5% of days), expected loss is at least this much.</div>
+                    </div>
+                    <div class="pm-value negative">{_fmt_pct(_num("VaR_95"))}</div>
+                </div>
+                <div class="pm-row">
+                    <div>
+                        <div class="pm-label">CVaR 95%</div>
+                        <div class="pm-desc">On the very worst days (beyond VaR), this is the average loss.</div>
+                    </div>
+                    <div class="pm-value negative">{_fmt_pct(_num("CVaR_95"))}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown('<div class="pm-head">Benchmark Comparison - How Does It Move Vs The Market?</div>', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class="pm-panel">
+                <div class="pm-row">
+                    <div>
+                        <div class="pm-label">Correlation {_badge(corr_tone, corr_lbl)}</div>
+                        <div class="pm-desc">How closely returns track the benchmark. 1.0 means it moves in lockstep with the market.</div>
+                    </div>
+                    <div class="pm-value">{_fmt_num(corr, 2)}</div>
+                </div>
+                <div class="pm-row">
+                    <div>
+                        <div class="pm-label">Beta</div>
+                        <div class="pm-desc">Sensitivity to market moves. Higher beta means larger upside and downside swings.</div>
+                    </div>
+                    <div class="pm-value">{_fmt_num(_num("beta_relative_to_benchmark"), 2)} <span style="font-size:0.55em; font-weight:700;">vs market</span></div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def _render_explainability_table(df: pd.DataFrame, *, center_last_n: int = 1) -> None:
@@ -1624,55 +2001,165 @@ def _show_portfolio_simulator_tab() -> None:
         st.warning("Price cache not found or invalid. Run the scheduled pipeline before using the simulator.")
         return
 
+    valid_sim_tickers: set[str] = set()
+    prices_df, _pxerr = read_parquet_safe(PRICES_CACHE_PATH)
+    if prices_df is not None and not prices_df.empty and "Ticker" in prices_df.columns:
+        valid_sim_tickers = set(prices_df["Ticker"].astype(str).str.upper().str.strip().tolist())
+
     fundamentals = _load_fundamentals_union()
-    default_tickers = "AAPL, MSFT, NVDA, GOOGL"
+    if st.session_state.get("sim_force_manual_weighting_next", False):
+        st.session_state["sim_weighting_mode"] = "Manual weights"
+        st.session_state["sim_force_manual_weighting_next"] = False
 
-    r1c1, r1c2, r1c3 = st.columns([2.4, 1.2, 1.2], vertical_alignment="bottom")
-    with r1c1:
-        ticker_text = st.text_input("Tickers (comma-separated)", value=default_tickers, key="sim_tickers")
-    with r1c2:
-        weighting_mode = st.selectbox(
-            "Weighting",
-            ["Equal weight", "Market cap weight", "Manual weights"],
-            index=0,
-            key="sim_weighting_mode",
-        )
-    with r1c3:
-        benchmark = st.selectbox(
-            "Benchmark",
-            SIM_BENCHMARK_OPTIONS,
-            index=0,
-            key="sim_benchmark",
-        )
+    if "sim_holdings_rows" not in st.session_state:
+        st.session_state["sim_holdings_rows"] = _default_sim_holdings_rows()
+    st.session_state["sim_holdings_rows"] = _clean_sim_holdings_rows(st.session_state.get("sim_holdings_rows"))
+    sim_rows = st.session_state["sim_holdings_rows"]
+    auto_rf, auto_src = _auto_risk_free_rate_pct()
+    if "sim_risk_free_rate_pct" not in st.session_state:
+        st.session_state["sim_risk_free_rate_pct"] = float(auto_rf)
+        st.session_state["sim_risk_free_rate_source"] = auto_src
+    else:
+        # Recover from stale fallback labels when treasury cache becomes available.
+        prior_src = str(st.session_state.get("sim_risk_free_rate_source", ""))
+        if prior_src.lower().startswith("fallback default") and auto_src.lower().startswith("auto from treasury"):
+            st.session_state["sim_risk_free_rate_pct"] = float(auto_rf)
+            st.session_state["sim_risk_free_rate_source"] = auto_src
 
-    manual_weights_text = ""
-    if weighting_mode == "Manual weights":
-        manual_weights_text = st.text_input(
-            "Manual weights (comma-separated, same order as tickers)",
-            value="0.25, 0.25, 0.25, 0.25",
-            key="sim_manual_weights",
-        )
-
-    r2c1, r2c2, r2c3, r2c4, r2c5 = st.columns(5, vertical_alignment="bottom")
-    with r2c1:
-        lookback_years = st.selectbox("Lookback period", [1, 3, 5, 10], index=2, key="sim_lookback")
-    with r2c2:
-        rebalance_label = st.selectbox("Rebalance", ["None", "Monthly"], index=0, key="sim_rebalance")
-    with r2c3:
-        mode_label = st.selectbox("Simulation mode", ["Historical", "Monte Carlo"], index=0, key="sim_mode")
-    with r2c4:
-        initial_capital = float(
-            st.number_input(
-                "Starting capital ($)",
-                min_value=100.0,
-                max_value=100000000.0,
-                value=10000.0,
-                step=1000.0,
-                key="sim_initial_capital",
+    left_group, right_group = st.columns([2.4, 2.4], vertical_alignment="top")
+    with right_group:
+        top_a, top_b = st.columns(2, vertical_alignment="bottom")
+        with top_a:
+            weighting_mode = st.selectbox(
+                "Weighting",
+                ["Equal weight", "Market cap weight", "Manual weights"],
+                index=0,
+                key="sim_weighting_mode",
             )
+        with top_b:
+            benchmark = st.selectbox(
+                "Benchmark",
+                SIM_BENCHMARK_OPTIONS,
+                index=0,
+                key="sim_benchmark",
+            )
+
+        mid_a, mid_b = st.columns(2, vertical_alignment="bottom")
+        with mid_a:
+            lookback_years = st.selectbox("Lookback period", [1, 3, 5, 10], index=2, key="sim_lookback")
+        with mid_b:
+            rebalance_label = st.selectbox("Rebalance", ["None", "Monthly"], index=0, key="sim_rebalance")
+
+        bot_a, bot_b, bot_c, bot_d = st.columns([1.05, 1.20, 1.10, 1.10], vertical_alignment="bottom")
+        with bot_a:
+            mode_label = st.selectbox("Simulation mode", ["Historical", "Monte Carlo"], index=0, key="sim_mode")
+        with bot_b:
+            initial_capital = float(
+                st.number_input(
+                    "Starting capital ($)",
+                    min_value=100.0,
+                    max_value=100000000.0,
+                    value=10000.0,
+                    step=1000.0,
+                    key="sim_initial_capital",
+                )
+            )
+        with bot_c:
+            risk_free_rate_pct = float(
+                st.number_input(
+                    "Risk-free rate (%)",
+                    min_value=0.0,
+                    max_value=15.0,
+                    step=0.1,
+                    key="sim_risk_free_rate_pct",
+                )
+            )
+        with bot_d:
+            strict_mode = st.checkbox("Strict missing-data mode", value=False, key="sim_strict")
+        source_note = str(st.session_state.get("sim_risk_free_rate_source", "Fallback default (treasury cache unavailable)"))
+        st.caption(f"Risk-free rate source: {risk_free_rate_pct:.2f}% ({source_note})")
+
+    with left_group:
+        st.caption("Portfolio holdings")
+        popover_label = "Edit holdings list"
+        popover_ctx = (
+            st.popover(popover_label, use_container_width=True)
+            if hasattr(st, "popover")
+            else st.expander(popover_label, expanded=False)
         )
-    with r2c5:
-        strict_mode = st.checkbox("Strict missing-data mode", value=False, key="sim_strict")
+        with popover_ctx:
+            st.caption("Enter each ticker and its target portfolio weight (%).")
+            editor_df = pd.DataFrame(sim_rows, columns=["Ticker", "WeightPct"])
+            editor_kwargs: dict[str, object] = {}
+            if hasattr(st, "column_config"):
+                editor_kwargs["column_config"] = {
+                    "Ticker": st.column_config.TextColumn("Ticker", help="Example: AAPL"),
+                    "WeightPct": st.column_config.NumberColumn("Weight (%)", min_value=0.0, step=0.5, format="%.2f"),
+                }
+            edited_df = st.data_editor(
+                editor_df,
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                key="sim_holdings_editor",
+                **editor_kwargs,
+            )
+            proposed_rows = _clean_sim_holdings_rows(edited_df.to_dict(orient="records"))
+            proposed_total_pct = float(sum(float(r.get("WeightPct", 0.0) or 0.0) for r in proposed_rows))
+            over_allocated = proposed_total_pct > 100.0 + 1e-9
+            invalid_tickers = sorted(
+                [
+                    str(r.get("Ticker", "")).upper()
+                    for r in proposed_rows
+                    if valid_sim_tickers and str(r.get("Ticker", "")).upper() not in valid_sim_tickers
+                ]
+            )
+            if over_allocated:
+                st.error(f"Total weight is {proposed_total_pct:.2f}%. Please reduce to 100% or below before applying.")
+            if invalid_tickers:
+                st.error("Invalid ticker(s): " + ", ".join(invalid_tickers))
+            block_apply = over_allocated or bool(invalid_tickers)
+            if st.button("Apply holdings", key="sim_apply_holdings", use_container_width=True, disabled=block_apply):
+                st.session_state["sim_holdings_rows"] = proposed_rows
+                st.session_state["sim_force_manual_weighting_next"] = True
+                if hasattr(st, "rerun"):
+                    st.rerun()
+                else:
+                    st.experimental_rerun()
+
+        sim_rows = st.session_state.get("sim_holdings_rows", [])
+        ticker_text_preview, manual_weights_text_preview, total_pct_preview = _sim_rows_to_inputs(sim_rows)
+        tickers_preview = _parse_ticker_input(ticker_text_preview)
+        effective_holdings, preview_warnings = _build_holdings(
+            tickers=tickers_preview,
+            weighting_mode=weighting_mode,
+            fundamentals_df=fundamentals,
+            manual_weights_text=manual_weights_text_preview,
+        )
+        st.caption(f"Holdings: {len(sim_rows)} | Total entered: {total_pct_preview:.2f}%")
+        if effective_holdings:
+            preview_df = pd.DataFrame(
+                [{"Ticker": t, "Weight (%)": round(float(w) * 100.0, 2)} for t, w in effective_holdings]
+            )
+            st.dataframe(preview_df, use_container_width=True, hide_index=True)
+            if weighting_mode == "Manual weights":
+                total_effective = float(preview_df["Weight (%)"].sum()) if not preview_df.empty else 0.0
+                st.caption(f"Effective total: {total_effective:.2f}%")
+        elif sim_rows:
+            preview_df = pd.DataFrame(sim_rows, columns=["Ticker", "WeightPct"]).rename(columns={"WeightPct": "Weight (%)"})
+            st.dataframe(preview_df, use_container_width=True, hide_index=True)
+        if preview_warnings:
+            st.caption(preview_warnings[0])
+        if not sim_rows:
+            st.caption("No holdings entered yet.")
+
+    ticker_text, manual_weights_text, total_weight_pct = _sim_rows_to_inputs(st.session_state.get("sim_holdings_rows", []))
+    if weighting_mode == "Manual weights" and ticker_text:
+        if abs(total_weight_pct - 100.0) > 0.01:
+            st.info(
+                f"Manual weights total {total_weight_pct:.2f}%. "
+                "The simulator will normalize weights to sum to 100%."
+            )
 
     mc_paths = 1000
     horizon_days = 252
@@ -1707,6 +2194,7 @@ def _show_portfolio_simulator_tab() -> None:
                     mode="monte_carlo" if mode_label == "Monte Carlo" else "historical",
                     monte_carlo_paths=int(mc_paths),
                     horizon_days=int(horizon_days),
+                    risk_free_rate=float(risk_free_rate_pct) / 100.0,
                     strict=bool(strict_mode),
                     initial_capital=float(initial_capital),
                 )
@@ -1725,7 +2213,7 @@ def _show_portfolio_simulator_tab() -> None:
         try:
             artifact = generate_decision_brief(
                 simulation_result=result,
-                output_dir="data/run_artifacts",
+                output_dir=RUN_ARTIFACTS_DIR,
                 format="html",
                 title="Portfolio Decision Brief",
             )
@@ -1755,16 +2243,6 @@ def _show_portfolio_simulator_tab() -> None:
         else:
             label = str(at_start.iloc[-1]["RegimeLabel"])
         st.caption(f"Regime at simulation start ({sim_start.strftime('%Y-%m-%d')}): {label}")
-
-    insights = result.get("decision_insights", [])
-    if not insights:
-        st.caption("No insights available.")
-    else:
-        insight_items = "".join(f"<li>{line}</li>" for line in insights)
-        st.markdown(
-            f'<div class="ii-insights"><h4>Decision Insights</h4><ul>{insight_items}</ul></div>',
-            unsafe_allow_html=True,
-        )
 
     show_risk_overlay = st.checkbox(
         "Show Risk Overlay (adds a line showing calmer vs riskier periods)",
@@ -1832,14 +2310,26 @@ def _show_portfolio_simulator_tab() -> None:
                         ),
                     )
                 )
-                growth_chart = alt.layer(growth_lines, risk_line).resolve_scale(y="independent").properties(height=320).interactive()
+                growth_chart = (
+                    alt.layer(growth_lines, risk_line)
+                    .resolve_scale(y="independent")
+                    .properties(height=320, padding={"left": 18, "right": 12, "top": 8, "bottom": 36})
+                    .interactive()
+                )
             else:
-                growth_chart = growth_lines.properties(height=320).interactive()
+                growth_chart = growth_lines.properties(
+                    height=320, padding={"left": 18, "right": 12, "top": 8, "bottom": 36}
+                ).interactive()
             st.altair_chart(growth_chart, use_container_width=True)
         else:
             st.caption("No growth data available.")
     with c2:
-        st.markdown("#### Drawdown")
+        st.markdown(
+            '<div class="ii-insights-hdr"><h4>Drawdown</h4>'
+            '<span class="ii-insights-info" data-tooltip="Drawdown shows how far the portfolio is below its previous high at each point in time. 0% means it is at a new high; negative values mean it is still recovering from a prior peak. What to look for: deeper drops (for example -30% vs -10%) mean more severe pain, and long periods below 0% mean slower recovery. Use this chart to judge how much downside and recovery time you can comfortably handle.">i</span>'
+            "</div>",
+            unsafe_allow_html=True,
+        )
         draw_df = pd.DataFrame(
             {
                 "Date": pd.to_datetime(dds.index, errors="coerce"),
@@ -1860,36 +2350,26 @@ def _show_portfolio_simulator_tab() -> None:
                         axis=alt.Axis(format=".0f", labelExpr="datum.value + '%'"),
                     ),
                 )
-                .properties(height=320)
+                .properties(height=320, padding={"left": 18, "right": 12, "top": 8, "bottom": 36})
                 .interactive()
             )
             st.altair_chart(draw_chart, use_container_width=True)
         else:
             st.caption("No drawdown data available.")
 
-    st.markdown("#### Performance Metrics")
-    summary = result.get("summary", {}) or {}
-    pct_metrics = {
-        "CAGR",
-        "volatility",
-        "max_drawdown",
-        "worst_day",
-        "worst_month",
-        "VaR_95",
-        "CVaR_95",
-    }
-    rows = []
-    for metric, raw in summary.items():
-        if isinstance(raw, (int, float)):
-            if metric in pct_metrics:
-                val = f"{float(raw) * 100:.2f}%"
-            else:
-                val = f"{float(raw):.4f}"
-        else:
-            val = raw
-        rows.append({"Metric": metric, "Value": val})
-    summary_df = pd.DataFrame(rows, columns=["Metric", "Value"])
-    _render_sortable_centered_table(summary_df, ["Value"])
+    insights = result.get("decision_insights", [])
+    if not insights:
+        st.caption("No insights available.")
+    else:
+        split_idx = (len(insights) + 1) // 2
+        left_items = "".join(f"<li>{line}</li>" for line in insights[:split_idx])
+        right_items = "".join(f"<li>{line}</li>" for line in insights[split_idx:])
+        st.markdown(
+            f'<div class="ii-insights"><div class="ii-insights-hdr"><h4>Decision Insights</h4><span class="ii-insights-info" data-tooltip="How to read the last three bullets: (1) Concentration means how much your portfolio depends on a few positions. Moderate means some diversification, but a few names can still move results materially. (2) Volatility means how bumpy returns are year to year; higher volatility can mean larger ups and downs and may feel uncomfortable for conservative risk tolerance. (3) Downside tail risk uses CVaR 95%: it estimates the average loss on very bad days (the worst 5% of days). A value below -3% daily means losses can be meaningfully large when markets are stressed. These are rule-based summaries from your simulation outputs, not investment advice.">i</span></div><div class="ii-insights-cols"><ul>{left_items}</ul><ul>{right_items}</ul></div></div>',
+            unsafe_allow_html=True,
+        )
+
+    _render_performance_metrics_cards(result.get("summary", {}) or {})
 
     scenario = result.get("scenario_results")
     if scenario:
@@ -2018,7 +2498,7 @@ def _show_decision_intelligence_tab() -> None:
     try:
         import json
 
-        with open("data/model_registry.json", "r", encoding="utf-8") as f:
+        with open(MODEL_REGISTRY_PATH, "r", encoding="utf-8") as f:
             registry = json.load(f)
         generated_at = registry.get("generated_at")
         if generated_at:
@@ -2046,13 +2526,13 @@ def _show_decision_intelligence_tab() -> None:
         else:
             st.caption("No model entries found in model registry.")
     except Exception:
-        st.caption("`data/model_registry.json` not available.")
+        st.caption(f"`{MODEL_REGISTRY_PATH}` not available.")
 
     st.markdown("#### Model Health")
     try:
         import json
 
-        with open("data/model_health_report.json", "r", encoding="utf-8") as f:
+        with open(MODEL_HEALTH_PATH, "r", encoding="utf-8") as f:
             health = json.load(f)
         generated_at = health.get("generated_at")
         if generated_at:
@@ -2085,13 +2565,46 @@ def _show_decision_intelligence_tab() -> None:
                 cov_rows.append(row)
             cov_df = pd.DataFrame(cov_rows)
             if not cov_df.empty:
+                live_specs: dict[str, tuple[str, list[str]]] = {
+                    "fundamentals_cache": (FUNDAMENTALS_CACHE_PATH, ["Ticker"]),
+                    "prices_cache": (PRICES_CACHE_PATH, ["Ticker", "Date", "AdjClose"]),
+                    "treasury_yields_cache": (TREASURY_YIELDS_CACHE_PATH, ["Date", "10Y", "2Y", "3M"]),
+                }
+                for idx, r in cov_df.iterrows():
+                    cache_name = str(r.get("cache") or "")
+                    if cache_name not in live_specs:
+                        continue
+                    rel_path, req_cols = live_specs[cache_name]
+                    cands = [rel_path]
+                    rp = Path(rel_path)
+                    if not rp.is_absolute():
+                        cands.append(str((ROOT / rp).resolve()))
+                    live_status = None
+                    chosen_path = rel_path
+                    for p in cands:
+                        s = get_cache_status(p, 365, required_columns=req_cols)
+                        if s.exists:
+                            live_status = s
+                            chosen_path = p
+                            break
+                        if live_status is None:
+                            live_status = s
+                    if live_status is None:
+                        continue
+                    cov_df.at[idx, "exists"] = bool(live_status.exists)
+                    cov_df.at[idx, "schema_ok"] = bool(live_status.schema_ok)
+                    cov_df.at[idx, "age_days"] = round(float(live_status.age_days), 2) if live_status.exists else None
+                    live_df, _lerr = read_parquet_safe(chosen_path) if live_status.exists else (None, None)
+                    cov_df.at[idx, "row_count"] = int(len(live_df)) if live_df is not None else None
                 preferred_cov_cols = ["cache", "exists", "schema_ok", "row_count", "status", "value"]
+                if "age_days" in cov_df.columns:
+                    preferred_cov_cols.insert(4, "age_days")
                 cov_cols = [c for c in preferred_cov_cols if c in cov_df.columns]
                 if not cov_cols:
                     cov_cols = list(cov_df.columns)
                 _render_sortable_centered_table(cov_df[cov_cols], ["exists", "schema_ok"])
     except Exception:
-        st.caption("`data/model_health_report.json` not available.")
+        st.caption(f"`{MODEL_HEALTH_PATH}` not available.")
 
 
 def _show_explainability_tab() -> None:

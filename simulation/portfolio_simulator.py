@@ -243,9 +243,9 @@ def _decision_insights(
         direction = "outperformed" if rel_gap >= 0 else "underperformed"
         insights.append(
             f"Portfolio grew from ${initial_capital:,.0f} to ${ending_portfolio_value:,.0f} ({portfolio_gain_pct:.1f}%), "
-            f"vs benchmark ${ending_benchmark_value:,.0f} ({benchmark_gain_pct:.1f}%); "
-            f"portfolio {direction} by ${abs(rel_gap):,.0f}."
+            f"vs benchmark ${ending_benchmark_value:,.0f} ({benchmark_gain_pct:.1f}%)."
         )
+        insights.append(f"Portfolio {direction} by ${abs(rel_gap):,.0f}.")
     else:
         insights.append(
             f"Portfolio grew from ${initial_capital:,.0f} to ${ending_portfolio_value:,.0f} ({portfolio_gain_pct:.1f}%)."
