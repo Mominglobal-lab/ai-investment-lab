@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 import html
@@ -13,10 +13,15 @@ import streamlit as st
 try:
     from st_aggrid import AgGrid, GridOptionsBuilder
     from st_aggrid.shared import JsCode
+    try:
+        from st_aggrid import GridUpdateMode
+    except Exception:
+        GridUpdateMode = None
 except Exception:
     AgGrid = None
     GridOptionsBuilder = None
     JsCode = None
+    GridUpdateMode = None
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -726,8 +731,95 @@ def _apply_premium_theme() -> None:
             font-size: 1.02rem;
             line-height: 1.3;
         }
+        .diw-status-strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 14px;
+            align-items: center;
+            border: 1px solid rgba(135, 162, 196, 0.26);
+            border-radius: 12px;
+            background: rgba(10, 22, 41, 0.55);
+            padding: 10px 12px;
+            margin-bottom: 10px;
+            color: #d9e7ff;
+            font-size: 0.97rem;
+        }
+        .diw-sep {
+            color: #90a9ce;
+            opacity: 0.8;
+        }
+        .diw-status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(133, 163, 202, 0.45);
+            background: rgba(44, 77, 120, 0.32);
+            font-weight: 700;
+            color: #d8e7ff;
+            font-size: 0.92rem;
+        }
+        .diw-status-pill-high {
+            border-color: rgba(255, 134, 134, 0.62);
+            background: rgba(153, 51, 51, 0.35);
+            color: #ffd5d5;
+        }
+        .diw-status-pill-medium {
+            border-color: rgba(255, 189, 102, 0.62);
+            background: rgba(145, 92, 35, 0.32);
+            color: #ffe2b5;
+        }
+        .diw-status-pill-low {
+            border-color: rgba(102, 214, 169, 0.52);
+            background: rgba(29, 113, 84, 0.28);
+            color: #c6f3e2;
+        }
+        .diw-action-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+        .diw-action-card {
+            border: 1px solid rgba(135, 162, 196, 0.28);
+            border-radius: 14px;
+            background: rgba(10, 22, 41, 0.55);
+            padding: 12px 14px;
+        }
+        .diw-action-title {
+            color: #edf4ff;
+            font-weight: 800;
+            font-size: 1.18rem;
+            line-height: 1.2;
+            margin-bottom: 4px;
+        }
+        .diw-action-copy {
+            color: #c7d9f5;
+            font-size: 1.0rem;
+            line-height: 1.35;
+            min-height: 54px;
+        }
+        .diw-action-meta {
+            margin-top: 8px;
+            color: #9fb6da;
+            font-size: 0.95rem;
+        }
+        .diw-action-cta {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 10px;
+            border: 1px solid rgba(132, 161, 198, 0.45);
+            border-radius: 10px;
+            padding: 7px 12px;
+            color: #e8f1ff;
+            font-weight: 700;
+            text-decoration: none;
+            background: rgba(40, 65, 100, 0.35);
+            font-size: 0.96rem;
+        }
         @media (max-width: 980px) {
-            .diw-cards, .diw-changed {
+            .diw-cards, .diw-changed, .diw-action-grid {
                 grid-template-columns: 1fr;
             }
             .diw-breakdown {
@@ -761,11 +853,26 @@ def _fi_paths(universe: str) -> tuple[str, str]:
     raise ValueError(f"Unsupported fixed-income universe: {universe}")
 
 
+@st.cache_data(show_spinner=False, ttl=300)
 def _load_fundamentals_union() -> pd.DataFrame:
     paths = [
         FUNDAMENTALS_CACHE_PATH,
         FUNDAMENTALS_CACHE_SP500_PATH,
         FUNDAMENTALS_CACHE_NASDAQ100_PATH,
+    ]
+    keep_priority_cols = [
+        "Ticker",
+        "Company",
+        "Sector",
+        "Close",
+        "MarketCap",
+        "EBITDA_Margin",
+        "ROE",
+        "Revenue_Growth_YoY_Pct",
+        "Earnings_Growth_Pct",
+        "PE_Ratio",
+        "PEG_Ratio",
+        "Rule_of_40",
     ]
     frames: list[pd.DataFrame] = []
     for p in paths:
@@ -774,15 +881,54 @@ def _load_fundamentals_union() -> pd.DataFrame:
             continue
         if "Ticker" not in df.columns:
             continue
-        keep_cols = [c for c in ["Ticker", "MarketCap"] if c in df.columns]
+        keep_cols = [c for c in keep_priority_cols if c in df.columns]
         frames.append(df[keep_cols].copy())
     if not frames:
-        return pd.DataFrame(columns=["Ticker", "MarketCap"])
+        return pd.DataFrame(columns=["Ticker", "Company", "Sector", "MarketCap"])
     out = pd.concat(frames, axis=0, ignore_index=True)
     out["Ticker"] = out["Ticker"].astype(str).str.upper().str.strip()
-    out["MarketCap"] = pd.to_numeric(out.get("MarketCap"), errors="coerce")
-    out = out.dropna(subset=["Ticker"]).drop_duplicates(subset=["Ticker"], keep="last")
+    if "MarketCap" in out.columns:
+        out["MarketCap"] = pd.to_numeric(out.get("MarketCap"), errors="coerce")
+    out = out.dropna(subset=["Ticker"])
+
+    def _first_non_null(s: pd.Series):
+        t = s.dropna()
+        if t.empty:
+            return np.nan
+        txt = t.astype(str).str.strip()
+        txt = txt[txt != ""]
+        return txt.iloc[0] if not txt.empty else np.nan
+
+    agg: dict[str, str | callable] = {}
+    for col in out.columns:
+        if col == "Ticker":
+            continue
+        if col == "MarketCap":
+            agg[col] = "max"
+        else:
+            agg[col] = _first_non_null
+    out = out.groupby("Ticker", as_index=False).agg(agg)
     return out
+
+
+@st.cache_data(show_spinner=False, ttl=300)
+def _build_portfolio_suggestion_base() -> pd.DataFrame:
+    qdf, _qe = read_parquet_safe(QUALITY_CACHE_PATH)
+    if qdf is None or qdf.empty:
+        return pd.DataFrame()
+    q = qdf.copy()
+    q["Ticker"] = q.get("Ticker", "").astype(str).str.upper().str.strip()
+    q["QualityScore"] = pd.to_numeric(q.get("QualityScore"), errors="coerce")
+    q["QualityTier"] = q.get("QualityTier", "").astype(str)
+    q = q.dropna(subset=["Ticker", "QualityScore"])
+    q = q[q["Ticker"] != ""]
+
+    fdf = _load_fundamentals_union()
+    if fdf is None or fdf.empty:
+        return q
+    f = fdf.copy()
+    f["Ticker"] = f["Ticker"].astype(str).str.upper().str.strip()
+    return q.merge(f, on="Ticker", how="left")
 
 
 def _load_explainability_feature_union() -> pd.DataFrame:
@@ -1065,7 +1211,8 @@ def _render_sortable_centered_table(df: pd.DataFrame, center_cols: list[str], pa
             if page_size is not None and int(page_size) > 0
             else max(1, len(show))
         )
-        grid_height = int(header_h + (max(1, visible_rows) * row_h) + 2)
+        pagination_footer_h = 44 if (page_size is not None and int(page_size) > 0) else 0
+        grid_height = int(header_h + (max(1, visible_rows) * row_h) + pagination_footer_h + 2)
         AgGrid(
             show,
             gridOptions=grid_options,
@@ -2246,6 +2393,1349 @@ def _show_fixed_income_tab() -> None:
     st.divider()
 
 
+def _show_market_intelligence_tab() -> None:
+    st.markdown("## Decision Intelligence")
+    import json
+
+    regime_df, _re = read_parquet_safe(REGIME_CACHE_PATH)
+    risk_df, _rk = read_parquet_safe(RISK_CACHE_PATH)
+    prob_df, _rp = read_parquet_safe(REGIME_PROB_PATH)
+    evidence_df, _ee = read_parquet_safe(REGIME_EVIDENCE_PATH)
+    alert_df, _ae = read_parquet_safe(ALERT_LOG_PATH)
+    quality_df, _qe = read_parquet_safe(QUALITY_CACHE_PATH)
+
+    def _latest_row(df: pd.DataFrame | None) -> pd.Series | None:
+        if df is None or df.empty:
+            return None
+        out = df.copy()
+        if "Date" in out.columns:
+            out["Date"] = pd.to_datetime(out["Date"], errors="coerce")
+            out = out.dropna(subset=["Date"]).sort_values("Date")
+            if out.empty:
+                return None
+        return out.tail(1).iloc[0]
+
+    def _row_get(row: pd.Series | None, key: str, default: object) -> object:
+        if row is None:
+            return default
+        return row.get(key, default)
+
+    def _conf_bucket(v: float) -> tuple[str, str]:
+        if not np.isfinite(v):
+            return "Unknown", "#dce3ee"
+        if v > 0.70:
+            return "High", "#dff4ec"
+        if v >= 0.40:
+            return "Moderate", "#f3ecd9"
+        return "Low", "#f3e2dd"
+
+    rt, lt, pt, ps, po = st.tabs(["Is now a good time to invest?", "What looks promising?", "Portfolio suggestion", "Portfolio simulation", "Portfolio optimization"])
+
+    with rt:
+        regime_last = _latest_row(regime_df)
+        risk_last = _latest_row(risk_df)
+        prob_last = _latest_row(prob_df)
+        ev_last = _latest_row(evidence_df)
+
+        regime_label = str(_row_get(regime_last, "RegimeLabel", "Neutral"))
+        mood_map = {
+            "Risk On": ("GREEN", "Conditions look favorable", "Markets are in a risk-on environment", "#e1f0d6", "#2f5f2a"),
+            "Neutral": ("YELLOW", "Conditions are mixed", "No clear bullish or bearish trend", "#f6efd7", "#6a5315"),
+            "Risk Off": ("RED", "Conditions are defensive", "Markets are in a risk-off environment", "#f3dfde", "#7b2c2c"),
+        }
+        mood_tag, mood_title, mood_sub, mood_bg, mood_fg = mood_map.get(
+            regime_label, ("YELLOW", "Conditions are mixed", "No clear bullish or bearish trend", "#f6efd7", "#6a5315")
+        )
+
+        risk_level = str(_row_get(risk_last, "RiskLevel", "Unknown"))
+
+        conf_val = float("nan")
+        if prob_last is not None and "ConfidenceScore" in prob_last.index:
+            conf_val = float(pd.to_numeric(prob_last.get("ConfidenceScore"), errors="coerce"))
+        if not np.isfinite(conf_val) and regime_last is not None and "ConfidenceScore" in regime_last.index:
+            conf_val = float(pd.to_numeric(regime_last.get("ConfidenceScore"), errors="coerce"))
+        conf_label, conf_bg = _conf_bucket(conf_val)
+
+        summary_plain_map = {
+            "Risk On": "Market tone is constructive. You can lean in selectively, but add risk in steps.",
+            "Neutral": "Market tone is mixed. Hold steady, stay selective, and avoid big one-shot moves.",
+            "Risk Off": "Market tone is defensive. Protect downside and keep new risk tighter.",
+        }
+        summary_line = summary_plain_map.get(regime_label, "The market is in a wait-and-see phase.")
+        if ev_last is not None:
+            short = str(ev_last.get("ShortExplanation", "") or "").strip()
+            trigger_raw = str(ev_last.get("RuleTriggered", "") or "").strip()
+            trigger_key = trigger_raw.lower()
+            trigger_map = {
+                "neutral_default": "No clear market trend is in place, so this is a hold-steady environment.",
+                "risk_on_confirmed": "Risk appetite is improving; adding exposure gradually can be reasonable.",
+                "risk_off_confirmed": "Downside pressure is elevated; favor defense and tighter risk controls.",
+                "volatility_rising": "Volatility is rising; use smaller position sizes and stagger entries.",
+                "yield_curve_inversion": "Macro stress signals are elevated; prioritize balance-sheet quality.",
+            }
+            jargon_tokens = [
+                "risk-on",
+                "risk off",
+                "jointly satisfied",
+                "trigger",
+                "default",
+                "conditions",
+            ]
+            short_lower = short.lower()
+            short_is_geeky = any(tok in short_lower for tok in jargon_tokens)
+            if short and not short_is_geeky:
+                summary_line = short
+            if trigger_key and trigger_key not in {"nan", "none"}:
+                plain_trigger = trigger_map.get(trigger_key, "")
+                if plain_trigger:
+                    existing = summary_line.lower()
+                    trigger_l = plain_trigger.lower()
+                    redundant_pairs = [
+                        ("hold steady", "hold-steady"),
+                        ("no clear market trend", "mixed"),
+                        ("defensive", "downside"),
+                        ("add risk in steps", "adding exposure gradually"),
+                    ]
+                    is_redundant = any(a in existing and b in trigger_l for a, b in redundant_pairs) or any(
+                        b in existing and a in trigger_l for a, b in redundant_pairs
+                    )
+                    if plain_trigger.rstrip(".").lower() in existing:
+                        is_redundant = True
+                    if not is_redundant:
+                        summary_line = f"{summary_line} {plain_trigger}"
+
+        fresh_count = 0
+        stale_count = 0
+        unknown_count = 0
+        generated_at = pd.NaT
+        try:
+            with open(MODEL_HEALTH_PATH, "r", encoding="utf-8") as f:
+                health = json.load(f)
+            generated_at = pd.to_datetime(health.get("generated_at"), errors="coerce")
+            freshness = health.get("model_freshness", {})
+            if isinstance(freshness, dict):
+                vals = [str(v).strip().lower() for v in freshness.values()]
+                fresh_count = int(sum(v == "fresh" for v in vals))
+                stale_count = int(sum(v == "stale" for v in vals))
+                unknown_count = int(len(vals) - fresh_count - stale_count)
+        except Exception:
+            fresh_count = 0
+            stale_count = 0
+            unknown_count = 0
+
+        # Cross-check with live cache status to avoid optimistic stale/refresh labels.
+        live_paths = [
+            REGIME_CACHE_PATH,
+            RISK_CACHE_PATH,
+            REGIME_PROB_PATH,
+            REGIME_EVIDENCE_PATH,
+            ALERT_LOG_PATH,
+        ]
+        live_statuses = [get_cache_status(p, MAX_AGE_DAYS) for p in live_paths]
+        live_ready = int(sum(1 for s in live_statuses if s.exists and s.schema_ok and s.is_fresh))
+        live_problem = int(len(live_statuses) - live_ready)
+
+        latest_signal_date = pd.to_datetime(
+            max(
+                [
+                    pd.to_datetime(_row_get(regime_last, "Date", pd.NaT), errors="coerce"),
+                    pd.to_datetime(_row_get(risk_last, "Date", pd.NaT), errors="coerce"),
+                    pd.to_datetime(_row_get(prob_last, "Date", pd.NaT), errors="coerce"),
+                    pd.to_datetime(_row_get(ev_last, "Date", pd.NaT), errors="coerce"),
+                ]
+            ),
+            errors="coerce",
+        )
+        refresh_date = pd.to_datetime(generated_at, errors="coerce")
+        if pd.isna(refresh_date):
+            refresh_date = latest_signal_date
+        refresh_text = refresh_date.strftime("%b %d, %Y") if pd.notna(refresh_date) else "unknown date"
+        today_local = pd.Timestamp.now().normalize()
+        is_today_refresh = pd.notna(refresh_date) and (refresh_date.normalize() == today_local)
+
+        if live_problem == 0 and fresh_count > 0 and stale_count == 0 and unknown_count == 0:
+            data_status_text = (
+                "Data is up to date - last refreshed today"
+                if is_today_refresh
+                else f"Data is up to date - last refreshed {refresh_text}"
+            )
+            data_bg = "#e1f0d6"
+            data_fg = "#2f5f2a"
+        else:
+            data_status_text = (
+                f"Data needs refresh - {live_problem} of {len(live_statuses)} live caches are stale/missing"
+                if live_problem > 0
+                else "Data needs refresh - some model artifacts are stale"
+            )
+            data_bg = "#f6efd7"
+            data_fg = "#6a5315"
+
+        critical_count = 0
+        if alert_df is not None and not alert_df.empty and "Severity" in alert_df.columns:
+            adf = alert_df.copy()
+            if "Date" in adf.columns:
+                adf["Date"] = pd.to_datetime(adf["Date"], errors="coerce")
+                adf = adf.dropna(subset=["Date"])
+                if not adf.empty:
+                    ref_date = pd.to_datetime(max(adf["Date"].max(), latest_signal_date), errors="coerce")
+                    if pd.notna(ref_date):
+                        adf = adf[adf["Date"] >= (ref_date - pd.Timedelta(days=90))]
+            critical_count = int((adf["Severity"].astype(str).str.lower() == "critical").sum())
+
+        conf_pct_val = int(round(conf_val * 100)) if np.isfinite(conf_val) else 0
+        conf_pct = f"{conf_pct_val}%"
+        conf_bar = max(6, min(100, conf_pct_val))
+        risk_badge = str(risk_level).strip().lower()
+        risk_pill = {"low": ("Safe", "#daf5ea", "#1f6a4c"), "moderate": ("Watch", "#f8efd9", "#80550e"), "high": ("Elevated", "#f5dfdf", "#7b2c2c")}
+        risk_txt, risk_bg, risk_fg = risk_pill.get(risk_badge, ("Unknown", "#dce3ee", "#2f3e58"))
+        mood_title_emph = {"Risk On": "Favorable", "Neutral": "Mixed", "Risk Off": "Defensive"}.get(regime_label, "Mixed")
+        mood_icon_map = {
+            "Risk On": ("R+", "#25d3a8", "#0b2a2b"),
+            "Neutral": ("N", "#ffd247", "#2a2208"),
+            "Risk Off": ("R-", "#ff8d8d", "#2d1212"),
+        }
+        mood_icon_text, mood_icon_bg, mood_icon_fg = mood_icon_map.get(regime_label, ("N", "#ffd247", "#2a2208"))
+
+        h_left, h_right = st.columns([1.2, 1.0], vertical_alignment="bottom")
+        with h_left:
+            st.markdown(
+                f"""
+                <div style="display:inline-block; border:1px solid #6d5d20; border-radius:10px; padding:5px 10px; background:rgba(38,27,7,0.55); color:#f3c445; font-weight:800; letter-spacing:0.05em; font-size:0.86rem; margin-bottom:6px;">
+                  ⚡ {html.escape(regime_label.upper())} SIGNAL
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with h_right:
+            st.markdown(
+                "<div style='font-size:2.0rem; font-weight:800; color:#edf4ff; margin:0 0 6px 0;'>Key Metrics</div>",
+                unsafe_allow_html=True,
+            )
+
+        left_col, right_col = st.columns([1.2, 1.0], vertical_alignment="top")
+        with left_col:
+            st.markdown(
+                f"""
+                <div style="border:1px solid rgba(120,146,181,0.24); border-radius:16px; padding:14px 16px; background:linear-gradient(140deg, rgba(9,20,39,0.92), rgba(9,20,39,0.65)); min-height:154px;">
+                  <div style="display:flex; gap:14px; align-items:center;">
+                    <div style="width:72px; height:72px; border-radius:16px; background:linear-gradient(145deg, rgba(20,34,56,0.95), rgba(11,22,40,0.95)); border:1px solid rgba(129,156,193,0.35); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;">
+                      <div style="padding:3px 9px; border-radius:999px; background:{mood_icon_bg}; color:{mood_icon_fg}; font-size:0.86rem; font-weight:900; letter-spacing:0.03em;">{mood_icon_text}</div>
+                      <div style="width:28px; height:3px; border-radius:999px; background:rgba(120,146,181,0.55);"></div>
+                    </div>
+                    <div>
+                      <div style="font-size:2.0rem; font-weight:900; line-height:1.04; color:#f3f7ff;">Conditions are <span style="color:#ffd247;">{html.escape(mood_title_emph)}</span></div>
+                    </div>
+                  </div>
+                  <div style="margin-top:12px; color:#b5c8e6; font-size:0.95rem;">{html.escape(mood_sub)}.</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with right_col:
+            mc1, mc2 = st.columns(2)
+            with mc1:
+                st.markdown(
+                    f"""
+                    <div style="border:1px solid rgba(120,146,181,0.24); border-top:3px solid #37d6b5; border-radius:14px; padding:10px 12px; background:rgba(10,22,41,0.50); min-height:154px;">
+                      <div class="diw-muted">Risk level</div>
+                      <div style="display:flex; align-items:center; gap:8px; margin-top:4px;">
+                        <div style="font-size:1.75rem; font-weight:900; color:#edf4ff;">{html.escape(risk_level)}</div>
+                        <div style="padding:2px 8px; border-radius:999px; background:{risk_bg}; color:{risk_fg}; font-weight:700; font-size:0.82rem;">{risk_txt}</div>
+                      </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            with mc2:
+                st.markdown(
+                    f"""
+                    <div style="border:1px solid rgba(120,146,181,0.24); border-top:3px solid #a26dff; border-radius:14px; padding:10px 12px; background:rgba(10,22,41,0.50); min-height:154px;">
+                      <div class="diw-muted">Confidence</div>
+                      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:4px;">
+                        <div style="font-size:1.75rem; font-weight:900; color:#edf4ff;">{conf_pct}</div>
+                        <div style="padding:2px 8px; border-radius:999px; background:{conf_bg}; color:#4f401f; font-weight:700; font-size:0.82rem;">{conf_label}</div>
+                      </div>
+                      <div style="height:5px; margin-top:12px; border-radius:999px; background:rgba(131,152,182,0.26);">
+                        <div style="height:5px; width:{conf_bar}%; border-radius:999px; background:linear-gradient(90deg, #26d5c3, #6f7cff);"></div>
+                      </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+        st.markdown(
+            f"""
+            <div style="margin-top:10px; border:1px solid rgba(120,146,181,0.24); border-top:3px solid #26d5c3; border-radius:14px; padding:14px 16px; background:rgba(10,22,41,0.45);">
+              <div style="color:#26d5c3; font-size:1.05rem; font-weight:800; text-transform:uppercase; letter-spacing:0.05em;">What This Means For You</div>
+              <div style="margin-top:8px; color:#d6e3f8; font-size:1.12rem; line-height:1.55;">{html.escape(summary_line)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("##### Data Status")
+        st.markdown(
+            f"""
+            <div style="border:1px solid rgba(60,190,150,0.35); border-radius:12px; padding:12px 14px; background:linear-gradient(90deg, rgba(22,72,52,0.55), rgba(8,33,49,0.35)); color:#8ef3be; font-weight:800;">
+              ✔ {html.escape(data_status_text)}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if critical_count > 0:
+            st.markdown(
+                f"""
+                <div style="margin-top:9px; border:1px solid rgba(250,184,65,0.45); border-radius:12px; padding:12px 14px; background:linear-gradient(90deg, rgba(72,48,16,0.60), rgba(34,24,7,0.35)); color:#ffcf67; font-weight:800;">
+                  ⚠ {critical_count} critical signal{'s' if critical_count != 1 else ''} detected - review before acting
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    with lt:
+        st.markdown("### Top Opportunities")
+        if quality_df is None or quality_df.empty:
+            st.caption("Quality data is not available right now.")
+        else:
+            q = quality_df.copy()
+            q["QualityScore"] = pd.to_numeric(q.get("QualityScore"), errors="coerce")
+            q["Ticker"] = q.get("Ticker", "").astype(str).str.upper().str.strip()
+            q["QualityTier"] = q.get("QualityTier", "").astype(str)
+            q = q.dropna(subset=["QualityScore"])
+            q = q[q["Ticker"] != ""]
+            ranked = q.sort_values("QualityScore", ascending=False).head(30).copy()
+            if ranked.empty:
+                st.caption("No candidates available in cache.")
+            else:
+                fdf = _load_fundamentals_union()
+                company_map: dict[str, str] = {}
+                if fdf is not None and not fdf.empty and {"Ticker", "Company"}.issubset(set(fdf.columns)):
+                    ftmp = fdf[["Ticker", "Company"]].copy()
+                    ftmp["Ticker"] = ftmp["Ticker"].astype(str).str.upper().str.strip()
+                    ftmp["Company"] = ftmp["Company"].astype(str).str.strip()
+                    company_map = dict(zip(ftmp["Ticker"], ftmp["Company"]))
+
+                qu, _qerr = read_parquet_safe(QUALITY_UNCERTAINTY_PATH)
+                conf_map: dict[str, str] = {}
+                if qu is not None and not qu.empty and "Ticker" in qu.columns:
+                    uq = qu.copy()
+                    uq["Ticker"] = uq["Ticker"].astype(str).str.upper().str.strip()
+                    if "Date" in uq.columns:
+                        uq["Date"] = pd.to_datetime(uq["Date"], errors="coerce")
+                        uq = uq.sort_values("Date")
+                    for tkr, grp in uq.groupby("Ticker"):
+                        r = grp.tail(1).iloc[0]
+                        stability = float(pd.to_numeric(r.get("TierStability"), errors="coerce")) if "TierStability" in r else float("nan")
+                        p10 = float(pd.to_numeric(r.get("ScoreP10"), errors="coerce")) if "ScoreP10" in r else float("nan")
+                        p90 = float(pd.to_numeric(r.get("ScoreP90"), errors="coerce")) if "ScoreP90" in r else float("nan")
+                        if np.isfinite(stability):
+                            cscore = stability
+                        elif np.isfinite(p10) and np.isfinite(p90):
+                            cscore = max(0.0, 1.0 - min(1.0, (p90 - p10) / 10.0))
+                        else:
+                            cscore = float("nan")
+                        if np.isfinite(cscore) and cscore > 0.80:
+                            conf_map[str(tkr)] = "High"
+                        elif np.isfinite(cscore) and cscore >= 0.60:
+                            conf_map[str(tkr)] = "Med"
+                        else:
+                            conf_map[str(tkr)] = "Low"
+
+                def _stars(score: float) -> int:
+                    if score >= 75:
+                        return 5
+                    if score >= 68:
+                        return 4
+                    if score >= 60:
+                        return 3
+                    if score >= 50:
+                        return 2
+                    return 1
+
+                rows: list[dict[str, object]] = []
+                for idx, (_, row) in enumerate(ranked.iterrows(), start=1):
+                    tkr = str(row.get("Ticker", ""))
+                    score = float(pd.to_numeric(row.get("QualityScore"), errors="coerce"))
+                    company = company_map.get(tkr, "Candidate")
+                    tier = str(row.get("QualityTier", "Neutral")).strip().lower()
+                    stars = ("★" * _stars(score)) + ("☆" * (5 - _stars(score)))
+                    if tier == "strong":
+                        tier_lbl = "Top tier"
+                    elif tier == "neutral":
+                        tier_lbl = "Mid tier"
+                    else:
+                        tier_lbl = "Watch"
+                    rows.append(
+                        {
+                            "Rank": idx,
+                            "Ticker": tkr,
+                            "Company": company,
+                            "Stars": stars,
+                            "Tier": tier_lbl,
+                            "Confidence": conf_map.get(tkr, "Med"),
+                            "QualityScore": round(score, 1),
+                        }
+                    )
+
+                show = pd.DataFrame(rows, columns=["Rank", "Ticker", "Company", "Stars", "Tier", "Confidence", "QualityScore"])
+                selected_ticker = None
+                if AgGrid is not None and GridOptionsBuilder is not None and JsCode is not None:
+                    show_grid = show.copy()
+                    show_grid.insert(0, "Action", "View Details")
+                    gb = GridOptionsBuilder.from_dataframe(show_grid)
+                    gb.configure_default_column(sortable=True, resizable=True, flex=1, minWidth=120)
+                    for c in ["Action", "Rank", "Ticker", "Company", "Stars", "Tier", "Confidence", "QualityScore"]:
+                        gb.configure_column(
+                            c,
+                            cellStyle={"textAlign": "center"},
+                            headerClass="di-header-center",
+                            cellClass="di-cell-center",
+                        )
+                    button_renderer = JsCode(
+                        """
+                        class BtnCellRenderer {
+                          init(params) {
+                            this.eGui = document.createElement('button');
+                            this.eGui.innerText = 'View Details';
+                            this.eGui.style.padding = '2px 10px';
+                            this.eGui.style.borderRadius = '999px';
+                            this.eGui.style.border = '1px solid rgba(91,186,255,0.45)';
+                            this.eGui.style.background = 'rgba(34,80,130,0.28)';
+                            this.eGui.style.color = '#dff1ff';
+                            this.eGui.style.fontWeight = '700';
+                            this.eGui.style.cursor = 'pointer';
+                            this.eGui.addEventListener('click', () => {
+                              params.node.setSelected(true, true);
+                            });
+                          }
+                          getGui() { return this.eGui; }
+                        }
+                        """
+                    )
+                    gb.configure_column(
+                        "Action",
+                        headerName="Details",
+                        width=150,
+                        minWidth=130,
+                        maxWidth=170,
+                        sortable=False,
+                        filter=False,
+                        cellRenderer=button_renderer,
+                    )
+                    gb.configure_selection("single", use_checkbox=False)
+                    grid_options = gb.build()
+                    grid_options["pagination"] = True
+                    grid_options["paginationPageSize"] = 5
+                    grid_options["rowHeight"] = 36
+                    grid_options["headerHeight"] = 40
+                    grid_height = int(40 + (5 * 36) + 44 + 2)
+                    aggrid_kwargs = {}
+                    if GridUpdateMode is not None:
+                        aggrid_kwargs["update_mode"] = GridUpdateMode.SELECTION_CHANGED
+                    grid_resp = AgGrid(
+                        show_grid,
+                        gridOptions=grid_options,
+                        allow_unsafe_jscode=True,
+                        fit_columns_on_grid_load=True,
+                        theme="streamlit",
+                        height=grid_height,
+                        width="100%",
+                        custom_css={
+                            ".ag-header-cell.di-header-center .ag-header-cell-label": {
+                                "justify-content": "center"
+                            },
+                            ".ag-cell.di-cell-center .ag-cell-wrapper": {
+                                "justify-content": "center"
+                            },
+                        },
+                        **aggrid_kwargs,
+                    )
+                    sel = grid_resp.get("selected_rows", [])
+                    if isinstance(sel, pd.DataFrame) and not sel.empty:
+                        selected_ticker = str(sel.iloc[0].get("Ticker", "")).strip().upper()
+                    elif isinstance(sel, list) and sel:
+                        selected_ticker = str((sel[0] or {}).get("Ticker", "")).strip().upper()
+                    elif isinstance(sel, dict):
+                        selected_ticker = str(sel.get("Ticker", "")).strip().upper()
+                else:
+                    _render_sortable_centered_table(show, ["Rank", "Stars", "Tier", "Confidence", "QualityScore"], page_size=5)
+
+                st.markdown("#### Selected Pick Details")
+                if selected_ticker:
+                    pick = selected_ticker
+                else:
+                    pick = st.selectbox(
+                        "Select from displayed picks",
+                        options=show["Ticker"].astype(str).tolist(),
+                        index=0,
+                        key="mi_pick_detail_ticker",
+                    )
+                if pick:
+                    qrow = ranked[ranked["Ticker"].astype(str) == str(pick)].head(1)
+                    if not qrow.empty:
+                        qrow = qrow.iloc[0]
+                        company = company_map.get(str(pick), "Company")
+                        qscore = float(pd.to_numeric(qrow.get("QualityScore"), errors="coerce"))
+                        qtier = str(qrow.get("QualityTier", "Neutral"))
+
+                        feat_map = {
+                            "Revenue_Growth_YoY_Pct": "Stable revenue growth",
+                            "EBITDA_Margin": "Strong earnings consistency",
+                            "ROE": "Efficient use of shareholder capital",
+                            "FreeCashFlow_Margin": "Healthy cash flow quality",
+                            "Volatility_63D_stability": "Stable price behavior",
+                            "Drawdown_252D_stability": "Lower downside stress",
+                        }
+
+                        pos_list: list[str] = []
+                        neg_list: list[str] = []
+                        qx, _qxe = read_parquet_safe(QUALITY_EXPLAIN_PATH)
+                        if qx is not None and not qx.empty and {"Ticker", "ContributionJSON"}.issubset(set(qx.columns)):
+                            xx = qx.copy()
+                            xx["Ticker"] = xx["Ticker"].astype(str).str.upper().str.strip()
+                            rr = xx[xx["Ticker"] == str(pick)].tail(1)
+                            if not rr.empty:
+                                try:
+                                    contrib = json.loads(str(rr.iloc[0].get("ContributionJSON", "{}")))
+                                except Exception:
+                                    contrib = {}
+                                items: list[tuple[str, float]] = []
+                                for k, v in (contrib or {}).items():
+                                    vv = pd.to_numeric(pd.Series([v]), errors="coerce").iloc[0]
+                                    if pd.isna(vv):
+                                        continue
+                                    items.append((str(k), float(vv)))
+                                pos_items = sorted([x for x in items if x[1] > 0], key=lambda x: abs(x[1]), reverse=True)[:3]
+                                neg_items = sorted([x for x in items if x[1] < 0], key=lambda x: abs(x[1]), reverse=True)[:3]
+                                pos_list = [feat_map.get(k, k.replace("_", " ")) for k, _ in pos_items]
+                                neg_list = [feat_map.get(k, k.replace("_", " ")) for k, _ in neg_items]
+
+                        p10 = p50 = p90 = float("nan")
+                        tier_stable = ""
+                        qu2, _qu2e = read_parquet_safe(QUALITY_UNCERTAINTY_PATH)
+                        if qu2 is not None and not qu2.empty and "Ticker" in qu2.columns:
+                            uu = qu2.copy()
+                            uu["Ticker"] = uu["Ticker"].astype(str).str.upper().str.strip()
+                            if "Date" in uu.columns:
+                                uu["Date"] = pd.to_datetime(uu["Date"], errors="coerce")
+                                uu = uu.sort_values("Date")
+                            ur = uu[uu["Ticker"] == str(pick)].tail(1)
+                            if not ur.empty:
+                                ur = ur.iloc[0]
+                                p10 = float(pd.to_numeric(ur.get("ScoreP10"), errors="coerce"))
+                                p50 = float(pd.to_numeric(ur.get("ScoreP50"), errors="coerce"))
+                                p90 = float(pd.to_numeric(ur.get("ScoreP90"), errors="coerce"))
+                                ts = float(pd.to_numeric(ur.get("TierStability"), errors="coerce")) if "TierStability" in ur else float("nan")
+                                if np.isfinite(ts):
+                                    tier_stable = "Yes" if ts >= 0.67 else "No"
+
+                        if not np.isfinite(p50):
+                            p50 = qscore
+                        if not np.isfinite(p10):
+                            p10 = max(0.0, p50 - 10.0)
+                        if not np.isfinite(p90):
+                            p90 = min(100.0, p50 + 10.0)
+                        band = max(0.0, p90 - p10)
+                        conf_txt = "High confidence" if band < 15 else ("Medium confidence" if band <= 30 else "Low confidence")
+                        p10w = max(4.0, min(100.0, p10))
+                        p50w = max(4.0, min(100.0, p50))
+                        p90w = max(4.0, min(100.0, p90))
+                        pos_lines = "".join([f"<div style='color:#59b133; margin:4px 0;'>+ {html.escape(x)}</div>" for x in (pos_list or ["Strengths are broad-based across fundamentals"])])
+                        neg_lines = "".join([f"<div style='color:#d14a4a; margin:4px 0;'>- {html.escape(x)}</div>" for x in (neg_list or ["No major negative driver stands out"])])
+
+                        st.markdown(
+                            f"""
+                            <div style="border:1px solid rgba(120,146,181,0.24); border-radius:14px; padding:14px 16px; background:linear-gradient(180deg, rgba(11,22,40,0.62), rgba(11,22,40,0.50));">
+                              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+                                <div>
+                                  <div style="font-size:2.0rem; font-weight:900; color:#edf4ff;">{html.escape(str(pick))} - {html.escape(company)}</div>
+                                  <div style="color:#b9cee8; margin-top:2px;">Quality score: {qscore:.1f} | {html.escape(qtier)}</div>
+                                </div>
+                                <div style="padding:4px 10px; border-radius:999px; background:#dff4ec; color:#1f6a4c; font-weight:800;">{html.escape(str(qtier).title())} tier</div>
+                              </div>
+                              <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:12px; border-top:1px solid rgba(120,146,181,0.18); padding-top:10px;">
+                                <div><div style="color:#9db3d6; font-weight:800; text-transform:uppercase;">Working in its favour</div>{pos_lines}</div>
+                                <div><div style="color:#9db3d6; font-weight:800; text-transform:uppercase;">Working against it</div>{neg_lines}</div>
+                              </div>
+                              <div style="margin-top:10px; border-top:1px solid rgba(120,146,181,0.18); padding-top:10px;">
+                                <div style="color:#9db3d6; font-weight:800; text-transform:uppercase;">How certain is this rating?</div>
+                                <div style="margin-top:6px; display:grid; grid-template-columns: 160px 1fr 40px; gap:8px; align-items:center;">
+                                  <div>Conservative case</div><div style="height:10px; border-radius:999px; background:rgba(131,152,182,0.20);"><div style="height:10px; width:{p10w:.1f}%; border-radius:999px; background:#b5d98f;"></div></div><div style="text-align:right;">{p10:.0f}</div>
+                                  <div>Central estimate</div><div style="height:10px; border-radius:999px; background:rgba(131,152,182,0.20);"><div style="height:10px; width:{p50w:.1f}%; border-radius:999px; background:#79b83a;"></div></div><div style="text-align:right;">{p50:.0f}</div>
+                                  <div>Optimistic case</div><div style="height:10px; border-radius:999px; background:rgba(131,152,182,0.20);"><div style="height:10px; width:{p90w:.1f}%; border-radius:999px; background:#5ea01f;"></div></div><div style="text-align:right;">{p90:.0f}</div>
+                                </div>
+                                <div style="margin-top:8px; color:#b9cee8;">Band width: {band:.0f} pts - {conf_txt}{(' - Tier stable: ' + tier_stable) if tier_stable else ''}</div>
+                              </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+    with pt:
+        st.markdown("### Portfolio Suggestion")
+        regime_last = _latest_row(regime_df)
+        risk_last = _latest_row(risk_df)
+        regime_label = str(_row_get(regime_last, "RegimeLabel", "Neutral"))
+        risk_level = str(_row_get(risk_last, "RiskLevel", "Unknown"))
+
+        if quality_df is None or quality_df.empty:
+            st.caption("Portfolio suggestion unavailable because quality data is missing.")
+        else:
+            merged = _build_portfolio_suggestion_base()
+            if merged is None or merged.empty:
+                st.caption("Portfolio suggestion unavailable because source data is empty.")
+                return
+
+            st.markdown("#### Build Your Suggested Portfolio")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                invest_type = st.selectbox(
+                    "Investment type",
+                    options=["Growth", "Income", "Defensive"],
+                    index=0,
+                    key="mi_invest_type",
+                )
+            with c2:
+                sectors = sorted([s for s in merged.get("Sector", pd.Series(dtype=object)).dropna().astype(str).unique().tolist()])
+                selected_sector = st.selectbox(
+                    "Sector filter",
+                    options=["All sectors"] + sectors,
+                    index=0,
+                    key="mi_sector_filter",
+                )
+            with c3:
+                weight_rule = st.selectbox(
+                    "Weighting rule",
+                    options=["Equal", "Score-proportional", "Manual"],
+                    index=0,
+                    key="mi_weight_rule",
+                )
+
+            # Step 1 + 2: investment-type and sector filters
+            pool = merged.copy()
+            notes: list[str] = []
+            if invest_type == "Growth":
+                pool = pool[(pool["QualityTier"].str.lower() == "strong") & (pool["QualityScore"] >= 67)]
+            elif invest_type == "Income":
+                if "DividendYield" in pool.columns:
+                    pool["DividendYield"] = pd.to_numeric(pool["DividendYield"], errors="coerce")
+                    pool = pool[pool["DividendYield"].fillna(0.0) > 0]
+                else:
+                    pool["EBITDA_Margin"] = pd.to_numeric(pool.get("EBITDA_Margin"), errors="coerce")
+                    thresh = float(pool["EBITDA_Margin"].median()) if pool["EBITDA_Margin"].notna().any() else 0.0
+                    pool = pool[pool["EBITDA_Margin"].fillna(-999) >= thresh]
+                    notes.append("Income filter uses profitability proxy because DividendYield is unavailable in current cache.")
+            else:  # Defensive
+                pool["MarketCap"] = pd.to_numeric(pool.get("MarketCap"), errors="coerce")
+                mc_thresh = float(pool["MarketCap"].median()) if pool["MarketCap"].notna().any() else float("nan")
+                pool = pool[pool["QualityTier"].str.lower().isin(["strong", "neutral"])]
+                if np.isfinite(mc_thresh):
+                    pool = pool[pool["MarketCap"].fillna(0.0) >= mc_thresh]
+                notes.append("Defensive filter uses higher-quality, larger-cap proxies (stock-level RiskScore is not available in cache).")
+
+            if selected_sector != "All sectors" and "Sector" in pool.columns:
+                pool = pool[pool["Sector"].astype(str) == selected_sector]
+
+            # Step 3: top 10 by same ranking logic
+            pool = pool.sort_values("QualityScore", ascending=False)
+            picks = pool.head(10).copy()
+
+            if picks.empty:
+                st.warning("No stocks match the selected filters. Try broadening sector or investment type.")
+            else:
+                # Step 4: weighting rule
+                if weight_rule == "Equal":
+                    w = np.repeat(1.0 / len(picks), len(picks))
+                elif weight_rule == "Score-proportional":
+                    s = pd.to_numeric(picks["QualityScore"], errors="coerce").fillna(0.0)
+                    s = np.maximum(s - s.min() + 1.0, 0.0)
+                    w = (s / s.sum()).values if s.sum() > 0 else np.repeat(1.0 / len(picks), len(picks))
+                else:
+                    default_manual = ", ".join([str(round(100.0 / len(picks), 1))] * len(picks))
+                    manual_txt = st.text_input(
+                        "Manual weights (%) - comma-separated, in ticker order shown below",
+                        value=default_manual,
+                        key="mi_manual_weights",
+                    )
+                    toks = [t.strip() for t in str(manual_txt).split(",") if t.strip()]
+                    vals: list[float] = []
+                    ok = True
+                    if len(toks) != len(picks):
+                        ok = False
+                    else:
+                        for t in toks:
+                            try:
+                                vals.append(float(t))
+                            except Exception:
+                                ok = False
+                                break
+                    if ok and sum(vals) > 0:
+                        arr = np.array(vals, dtype=float)
+                        w = arr / arr.sum()
+                    else:
+                        st.caption("Invalid manual weights. Falling back to equal weights.")
+                        w = np.repeat(1.0 / len(picks), len(picks))
+
+                picks = picks.assign(WeightPct=np.round(w * 100.0, 1))
+                drift = round(100.0 - float(picks["WeightPct"].sum()), 1)
+                if abs(drift) >= 0.1:
+                    picks.loc[picks.index[0], "WeightPct"] = round(float(picks.iloc[0]["WeightPct"]) + drift, 1)
+
+                # Step 5: display with plain-English inclusion reason
+                def _reason(row: pd.Series) -> str:
+                    exp = str(row.get("Explanation", "") or "").strip()
+                    first = exp.split(",")[0].strip() if exp else ""
+                    if first:
+                        return f"Included for {first.lower()}."
+                    if invest_type == "Growth":
+                        return "Included for strong quality and growth profile."
+                    if invest_type == "Income":
+                        return "Included for steadier profitability profile."
+                    return "Included for resilient quality characteristics."
+
+                picks["Reason"] = picks.apply(_reason, axis=1)
+                show_cols = ["Ticker", "Sector", "WeightPct", "QualityTier", "Reason"]
+                if "Sector" not in picks.columns:
+                    picks["Sector"] = "N/A"
+                show = picks[show_cols].rename(columns={"WeightPct": "Weight (%)", "QualityTier": "Tier"})
+
+                for n in notes:
+                    st.caption(n)
+
+                _render_sortable_centered_table(show, ["Weight (%)", "Tier"], page_size=10)
+
+                if st.button("Save Portfolio", key="mi_save_portfolio", use_container_width=False):
+                    out_path = DATA_DIR / "portfolio_suggestions_saved.jsonl"
+                    payload = {
+                        "saved_at_utc": pd.Timestamp.utcnow().isoformat(),
+                        "investment_type": invest_type,
+                        "sector_filter": selected_sector,
+                        "weight_rule": weight_rule,
+                        "market_mood": regime_label,
+                        "risk_level": risk_level,
+                        "holdings": show.to_dict(orient="records"),
+                    }
+                    try:
+                        with open(out_path, "a", encoding="utf-8") as f:
+                            f.write(json.dumps(payload) + "\n")
+                        # Keep simulation holdings in sync with the just-saved portfolio.
+                        synced_rows = _clean_sim_holdings_rows(
+                            [
+                                {
+                                    "Ticker": str(r.get("Ticker", "")).upper().strip(),
+                                    "WeightPct": float(pd.to_numeric(pd.Series([r.get("Weight (%)")]), errors="coerce").iloc[0] or 0.0),
+                                }
+                                for r in payload.get("holdings", [])
+                            ]
+                        )
+                        if synced_rows:
+                            st.session_state["mi_sim_holdings_rows"] = synced_rows
+                            st.session_state["mi_sim_holdings_source"] = "Loaded from latest saved portfolio suggestion"
+                            st.session_state["mi_sim_weighting_mode"] = "Manual weights"
+                            # Also sync the main Portfolio Decision Simulator tab if user opens it next.
+                            st.session_state["sim_holdings_rows"] = synced_rows
+                            st.session_state["sim_weighting_mode"] = "Manual weights"
+                        st.success(f"Saved to {out_path}")
+                    except Exception as e:
+                        st.error(f"Could not save portfolio: {e}")
+
+    with ps:
+        st.markdown("### Portfolio Simulation")
+
+        def _load_latest_saved_holdings_rows() -> tuple[list[dict[str, object]], str]:
+            out_path = DATA_DIR / "portfolio_suggestions_saved.jsonl"
+            if not out_path.exists():
+                return _default_sim_holdings_rows(), "Default starter holdings"
+            try:
+                lines = [ln.strip() for ln in out_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+                if not lines:
+                    return _default_sim_holdings_rows(), "Default starter holdings"
+                payload = json.loads(lines[-1])
+                holdings = payload.get("holdings", [])
+                rows: list[dict[str, object]] = []
+                if isinstance(holdings, list):
+                    for h in holdings:
+                        t = str((h or {}).get("Ticker") or "").strip().upper()
+                        w = pd.to_numeric(
+                            pd.Series([(h or {}).get("Weight (%)", (h or {}).get("WeightPct"))]),
+                            errors="coerce",
+                        ).iloc[0]
+                        if not t or pd.isna(w):
+                            continue
+                        rows.append({"Ticker": t, "WeightPct": float(w)})
+                clean = _clean_sim_holdings_rows(rows)
+                if clean:
+                    return clean, "Loaded from latest saved portfolio suggestion"
+            except Exception:
+                pass
+            return _default_sim_holdings_rows(), "Default starter holdings"
+
+        price_status = get_cache_status(PRICES_CACHE_PATH, MAX_AGE_DAYS, required_columns=PRICE_SCHEMA_COLUMNS)
+        if (not price_status.exists) or (not price_status.schema_ok):
+            st.warning("Price cache not found or invalid. Run the scheduled pipeline before using the simulator.")
+        else:
+            fundamentals = _load_fundamentals_union()
+
+            if "mi_sim_holdings_rows" not in st.session_state:
+                init_rows, init_src = _load_latest_saved_holdings_rows()
+                st.session_state["mi_sim_holdings_rows"] = init_rows
+                st.session_state["mi_sim_holdings_source"] = init_src
+                if str(init_src).lower().startswith("loaded from latest saved"):
+                    st.session_state["mi_sim_weighting_mode"] = "Manual weights"
+            st.session_state["mi_sim_holdings_rows"] = _clean_sim_holdings_rows(st.session_state.get("mi_sim_holdings_rows"))
+
+            auto_rf, auto_src = _auto_risk_free_rate_pct()
+            if "mi_sim_risk_free_rate_pct" not in st.session_state:
+                st.session_state["mi_sim_risk_free_rate_pct"] = float(auto_rf)
+                st.session_state["mi_sim_risk_free_rate_source"] = auto_src
+
+            run_clicked = False
+            export_clicked = False
+            left_group, right_group = st.columns([2.4, 2.4], vertical_alignment="top")
+            with right_group:
+                act_a, act_b = st.columns(2, vertical_alignment="bottom")
+                with act_a:
+                    run_clicked = st.button("Run Simulation", key="mi_sim_run_btn", use_container_width=True)
+                with act_b:
+                    export_clicked = st.button("Export Decision Brief", key="mi_sim_export_brief", use_container_width=True)
+                top_a, top_b = st.columns(2, vertical_alignment="bottom")
+                with top_a:
+                    weighting_mode = st.selectbox(
+                        "Weighting",
+                        ["Equal weight", "Market cap weight", "Manual weights"],
+                        key="mi_sim_weighting_mode",
+                    )
+                with top_b:
+                    benchmark = st.selectbox(
+                        "Benchmark",
+                        SIM_BENCHMARK_OPTIONS,
+                        index=0,
+                        key="mi_sim_benchmark",
+                    )
+
+                mid_a, mid_b = st.columns(2, vertical_alignment="bottom")
+                with mid_a:
+                    lookback_years = st.selectbox("Lookback period", [1, 3, 5, 10], index=2, key="mi_sim_lookback")
+                with mid_b:
+                    rebalance_label = st.selectbox("Rebalance", ["None", "Monthly"], index=0, key="mi_sim_rebalance")
+
+                bot_a, bot_b, bot_c, bot_d = st.columns([1.05, 1.20, 1.10, 1.10], vertical_alignment="bottom")
+                with bot_a:
+                    mode_label = st.selectbox("Simulation mode", ["Historical", "Monte Carlo"], index=0, key="mi_sim_mode")
+                with bot_b:
+                    initial_capital = float(
+                        st.number_input(
+                            "Starting capital ($)",
+                            min_value=100.0,
+                            max_value=100000000.0,
+                            value=10000.0,
+                            step=1000.0,
+                            key="mi_sim_initial_capital",
+                        )
+                    )
+                with bot_c:
+                    risk_free_rate_pct = float(
+                        st.number_input(
+                            "Risk-free rate (%)",
+                            min_value=0.0,
+                            max_value=15.0,
+                            step=0.1,
+                            key="mi_sim_risk_free_rate_pct",
+                        )
+                    )
+                with bot_d:
+                    strict_mode = st.checkbox("Strict missing-data mode", value=False, key="mi_sim_strict")
+                src_note = str(st.session_state.get("mi_sim_risk_free_rate_source", auto_src))
+                st.caption(f"Risk-free rate source: {risk_free_rate_pct:.2f}% ({src_note})")
+
+            with left_group:
+                st.caption("Portfolio holdings")
+                popover_label = "Edit holdings list"
+                popover_ctx = (
+                    st.popover(popover_label, use_container_width=True)
+                    if hasattr(st, "popover")
+                    else st.expander(popover_label, expanded=False)
+                )
+                with popover_ctx:
+                    editor_df = pd.DataFrame(st.session_state.get("mi_sim_holdings_rows", []), columns=["Ticker", "WeightPct"])
+                    editor_kwargs: dict[str, object] = {}
+                    if hasattr(st, "column_config"):
+                        editor_kwargs["column_config"] = {
+                            "Ticker": st.column_config.TextColumn("Ticker", help="Example: AAPL"),
+                            "WeightPct": st.column_config.NumberColumn("Weight (%)", min_value=0.0, step=0.5, format="%.2f"),
+                        }
+                    edited_df = st.data_editor(
+                        editor_df,
+                        use_container_width=True,
+                        hide_index=True,
+                        num_rows="dynamic",
+                        key="mi_sim_holdings_editor",
+                        **editor_kwargs,
+                    )
+                    proposed_rows = _clean_sim_holdings_rows(edited_df.to_dict(orient="records"))
+                    if st.button("Apply holdings", key="mi_sim_apply_holdings", use_container_width=True):
+                        st.session_state["mi_sim_holdings_rows"] = proposed_rows
+                        st.session_state["mi_sim_weighting_mode"] = "Manual weights"
+                        if hasattr(st, "rerun"):
+                            st.rerun()
+                        else:
+                            st.experimental_rerun()
+
+                sim_rows = st.session_state.get("mi_sim_holdings_rows", [])
+                ticker_text, manual_weights_text, total_weight_pct = _sim_rows_to_inputs(sim_rows)
+                st.caption(f"Holdings: {len(sim_rows)} | Total entered: {total_weight_pct:.2f}% | {str(st.session_state.get('mi_sim_holdings_source', ''))}")
+                if sim_rows:
+                    tickers_preview = _parse_ticker_input(ticker_text)
+                    effective_preview, preview_warnings = _build_holdings(
+                        tickers=tickers_preview,
+                        weighting_mode=weighting_mode,
+                        fundamentals_df=fundamentals,
+                        manual_weights_text=manual_weights_text,
+                    )
+                    if effective_preview:
+                        preview_df = pd.DataFrame(
+                            [{"Ticker": t, "Weight (%)": round(float(w) * 100.0, 2)} for t, w in effective_preview]
+                        )
+                        st.dataframe(preview_df, use_container_width=True, hide_index=True)
+                        st.caption(f"Displayed allocation reflects: {weighting_mode}")
+                    else:
+                        preview_df = pd.DataFrame(sim_rows, columns=["Ticker", "WeightPct"]).rename(columns={"WeightPct": "Weight (%)"})
+                        st.dataframe(preview_df, use_container_width=True, hide_index=True)
+                    if preview_warnings:
+                        st.caption(preview_warnings[0])
+
+            mc_paths = 1000
+            horizon_days = 252
+            if mode_label == "Monte Carlo":
+                m1, m2 = st.columns(2, vertical_alignment="bottom")
+                with m1:
+                    mc_paths = int(st.number_input("Number of simulations", min_value=100, max_value=20000, value=1000, step=100, key="mi_sim_mc_paths"))
+                with m2:
+                    horizon_years = float(st.number_input("Horizon years", min_value=0.5, max_value=10.0, value=1.0, step=0.5, key="mi_sim_horizon_years"))
+                    horizon_days = int(round(horizon_years * 252))
+
+            tickers = _parse_ticker_input(ticker_text)
+            holdings, build_warnings = _build_holdings(
+                tickers=tickers,
+                weighting_mode=weighting_mode,
+                fundamentals_df=fundamentals,
+                manual_weights_text=manual_weights_text,
+            )
+            for w in build_warnings:
+                st.warning(w)
+
+            if run_clicked:
+                if not holdings:
+                    st.error("Cannot run simulation: invalid holdings setup.")
+                else:
+                    try:
+                        result = simulate_portfolio(
+                            holdings=holdings,
+                            lookback_years=int(lookback_years),
+                            rebalance_rule="monthly" if rebalance_label == "Monthly" else "none",
+                            benchmark=benchmark or "SPY",
+                            mode="monte_carlo" if mode_label == "Monte Carlo" else "historical",
+                            monte_carlo_paths=int(mc_paths),
+                            horizon_days=int(horizon_days),
+                            risk_free_rate=float(risk_free_rate_pct) / 100.0,
+                            strict=bool(strict_mode),
+                            initial_capital=float(initial_capital),
+                        )
+                        st.session_state["mi_portfolio_sim_result"] = result
+                    except Exception as e:
+                        st.error(f"Simulation failed: {e}")
+
+            result = st.session_state.get("mi_portfolio_sim_result")
+            if export_clicked:
+                if not result:
+                    st.warning("Run a simulation first, then export.")
+                else:
+                    try:
+                        artifact = generate_decision_brief(
+                            simulation_result=result,
+                            output_dir=RUN_ARTIFACTS_DIR,
+                            format="html",
+                            title="Portfolio Decision Brief",
+                        )
+                        st.success(
+                            "Decision Brief exported. "
+                            f"HTML: {artifact.get('html_path')} | JSON: {artifact.get('json_path')}"
+                        )
+                    except Exception as e:
+                        st.error(f"Decision Brief export failed: {e}")
+
+            if result:
+                ts = result.get("timeseries", {})
+                dates = pd.to_datetime(ts.get("dates", []), errors="coerce")
+                pvals = pd.Series(ts.get("portfolio_value", []), index=dates, name="Portfolio")
+                dds = pd.Series(ts.get("drawdown", []), index=dates, name="Drawdown")
+                bvals_raw = ts.get("benchmark_value")
+                bvals = pd.Series(bvals_raw, index=dates, name="Benchmark") if bvals_raw is not None else None
+
+                show_risk_overlay = st.checkbox(
+                    "Show Risk Overlay (adds a line showing calmer vs riskier periods)",
+                    value=False,
+                    key="mi_sim_show_risk_overlay",
+                )
+
+                c1, c2 = st.columns(2)
+                with c1:
+                    end_portfolio = float(pvals.dropna().iloc[-1]) if not pvals.dropna().empty else 0.0
+                    start_capital = float((result.get("metadata") or {}).get("initial_capital", 10000.0))
+                    if bvals is not None and not bvals.dropna().empty:
+                        end_benchmark = float(bvals.dropna().iloc[-1])
+                        growth_title = (
+                            f"#### Growth of \\${start_capital:,.0f} "
+                            f"(Portfolio \\${end_portfolio:,.0f} vs. Benchmark \\${end_benchmark:,.0f})"
+                        )
+                    else:
+                        growth_title = (
+                            f"#### Growth of \\${start_capital:,.0f} "
+                            f"(Portfolio \\${end_portfolio:,.0f} vs. Benchmark N/A)"
+                        )
+                    st.markdown(growth_title)
+                    growth_df = pd.DataFrame({"Date": pd.to_datetime(pvals.index, errors="coerce"), "Portfolio": pvals.values}).dropna()
+                    if bvals is not None:
+                        btmp = pd.DataFrame({"Date": pd.to_datetime(bvals.index, errors="coerce"), "Benchmark": bvals.values}).dropna()
+                        growth_df = growth_df.merge(btmp, on="Date", how="left")
+                    growth_long = growth_df.melt(id_vars=["Date"], var_name="Series", value_name="Value").dropna()
+                    risk_overlay = None
+                    if show_risk_overlay:
+                        risk_df2, _risk_err2 = read_parquet_safe(RISK_CACHE_PATH)
+                        if risk_df2 is not None and not risk_df2.empty and {"Date", "RiskScore"}.issubset(set(risk_df2.columns)):
+                            rtmp = risk_df2.copy()
+                            rtmp["Date"] = pd.to_datetime(rtmp["Date"], errors="coerce")
+                            rtmp["RiskScore"] = pd.to_numeric(rtmp["RiskScore"], errors="coerce")
+                            rtmp = rtmp.dropna(subset=["Date", "RiskScore"]).sort_values("Date")
+                            if not rtmp.empty:
+                                risk_overlay = pd.merge_asof(
+                                    growth_df[["Date"]].sort_values("Date"),
+                                    rtmp[["Date", "RiskScore"]],
+                                    on="Date",
+                                    direction="backward",
+                                ).dropna()
+                    if not growth_long.empty:
+                        growth_lines = (
+                            alt.Chart(growth_long)
+                            .mark_line()
+                            .encode(
+                                x=alt.X("Date:T", title=""),
+                                y=alt.Y("Value:Q", title=""),
+                                color=alt.Color("Series:N", legend=alt.Legend(title="")),
+                            )
+                        )
+                        if risk_overlay is not None and not risk_overlay.empty:
+                            risk_line = (
+                                alt.Chart(risk_overlay)
+                                .mark_line(color="#ff9f43", strokeDash=[4, 4])
+                                .encode(
+                                    x=alt.X("Date:T", title=""),
+                                    y=alt.Y(
+                                        "RiskScore:Q",
+                                        title="Risk Score",
+                                        axis=alt.Axis(orient="right"),
+                                        scale=alt.Scale(domain=[0, 100]),
+                                    ),
+                                )
+                            )
+                            growth_chart = (
+                                alt.layer(growth_lines, risk_line)
+                                .resolve_scale(y="independent")
+                                .properties(height=320, padding={"left": 18, "right": 12, "top": 8, "bottom": 36})
+                                .interactive()
+                            )
+                        else:
+                            growth_chart = growth_lines.properties(
+                                height=320, padding={"left": 18, "right": 12, "top": 8, "bottom": 36}
+                            ).interactive()
+                        st.altair_chart(growth_chart, use_container_width=True)
+                    else:
+                        st.caption("No growth data available.")
+                with c2:
+                    st.markdown(
+                        '<div class="ii-insights-hdr"><h4>Drawdown</h4>'
+                        '<span class="ii-insights-info" data-tooltip="Drawdown shows how far the portfolio is below its previous high at each point in time. 0% means it is at a new high; negative values mean it is still recovering from a prior peak.">i</span>'
+                        "</div>",
+                        unsafe_allow_html=True,
+                    )
+                    draw_df = pd.DataFrame(
+                        {
+                            "Date": pd.to_datetime(dds.index, errors="coerce"),
+                            "DrawdownPct": (dds * 100.0).round(0),
+                        }
+                    ).dropna()
+                    if not draw_df.empty:
+                        y_min = float(draw_df["DrawdownPct"].min())
+                        draw_chart = (
+                            alt.Chart(draw_df)
+                            .mark_line()
+                            .encode(
+                                x=alt.X("Date:T", title=""),
+                                y=alt.Y(
+                                    "DrawdownPct:Q",
+                                    title="",
+                                    scale=alt.Scale(domain=[y_min, 0]),
+                                    axis=alt.Axis(format=".0f", labelExpr="datum.value + '%'"),
+                                ),
+                            )
+                            .properties(height=320, padding={"left": 18, "right": 12, "top": 8, "bottom": 36})
+                            .interactive()
+                        )
+                        st.altair_chart(draw_chart, use_container_width=True)
+                    else:
+                        st.caption("No drawdown data available.")
+
+                scenario = result.get("scenario_results")
+                if scenario:
+                    st.markdown("#### Monte Carlo Scenario Summary")
+                    end_pct = scenario.get("ending_value_percentiles", {})
+                    dd_pct = scenario.get("max_drawdown_percentiles", {})
+                    mc_rows = [
+                        {"Statistic": "Ending Value p05", "Value": f"${float(end_pct.get('p05') or 0.0):,.0f}"},
+                        {"Statistic": "Ending Value p50", "Value": f"${float(end_pct.get('p50') or 0.0):,.0f}"},
+                        {"Statistic": "Ending Value p95", "Value": f"${float(end_pct.get('p95') or 0.0):,.0f}"},
+                        {"Statistic": "Max Drawdown p05", "Value": f"{float(dd_pct.get('p05') or 0.0) * 100:.2f}%"},
+                        {"Statistic": "Max Drawdown p50", "Value": f"{float(dd_pct.get('p50') or 0.0) * 100:.2f}%"},
+                        {"Statistic": "Max Drawdown p95", "Value": f"{float(dd_pct.get('p95') or 0.0) * 100:.2f}%"},
+                        {"Statistic": "Probability of Loss", "Value": f"{float(scenario.get('probability_of_loss') or 0.0) * 100:.2f}%"},
+                    ]
+                    mc_df = pd.DataFrame(mc_rows, columns=["Statistic", "Value"])
+                    _render_sortable_centered_table(mc_df, ["Value"])
+
+                summary = result.get("summary", {}) or {}
+                _render_performance_metrics_cards(summary)
+
+    with po:
+        st.markdown("### Portfolio Optimization")
+
+        def _latest_saved_holdings_map() -> dict[str, float]:
+            out_path = DATA_DIR / "portfolio_suggestions_saved.jsonl"
+            if not out_path.exists():
+                return {}
+            try:
+                lines = [ln.strip() for ln in out_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+                if not lines:
+                    return {}
+                payload = json.loads(lines[-1])
+                holds = payload.get("holdings", [])
+                out: dict[str, float] = {}
+                if isinstance(holds, list):
+                    for h in holds:
+                        t = str((h or {}).get("Ticker") or "").strip().upper()
+                        w = pd.to_numeric(pd.Series([(h or {}).get("Weight (%)", (h or {}).get("WeightPct"))]), errors="coerce").iloc[0]
+                        if t and not pd.isna(w):
+                            out[t] = float(w)
+                return out
+            except Exception:
+                return {}
+
+        @st.cache_data(show_spinner=False, ttl=300)
+        def _price_cov_for_tickers(tickers: tuple[str, ...], lookback_years: int) -> pd.DataFrame:
+            px, _pe = read_parquet_safe(PRICES_CACHE_PATH)
+            if px is None or px.empty:
+                return pd.DataFrame()
+            req = {"Ticker", "Date", "AdjClose"}
+            if not req.issubset(set(px.columns)):
+                return pd.DataFrame()
+            p = px.copy()
+            p["Ticker"] = p["Ticker"].astype(str).str.upper().str.strip()
+            p["Date"] = pd.to_datetime(p["Date"], errors="coerce")
+            p["AdjClose"] = pd.to_numeric(p["AdjClose"], errors="coerce")
+            p = p.dropna(subset=["Ticker", "Date", "AdjClose"])
+            p = p[p["Ticker"].isin(list(tickers))]
+            if p.empty:
+                return pd.DataFrame()
+            end_date = p["Date"].max()
+            start_date = end_date - pd.Timedelta(days=int(365 * lookback_years))
+            p = p[p["Date"] >= start_date]
+            wide = p.pivot_table(index="Date", columns="Ticker", values="AdjClose", aggfunc="last").sort_index()
+            rets = wide.pct_change().replace([np.inf, -np.inf], np.nan).dropna(how="all")
+            if rets.empty:
+                return pd.DataFrame()
+            cov = rets.cov().fillna(0.0) * 252.0
+            return cov
+
+        def _bounded_weights(raw: np.ndarray, min_w: float, max_w: float) -> np.ndarray:
+            n = len(raw)
+            if n == 0:
+                return raw
+            x = np.array(raw, dtype=float)
+            x = np.where(np.isfinite(x), x, 0.0)
+            x = np.maximum(x, 0.0)
+            if x.sum() <= 0:
+                x = np.repeat(1.0 / n, n)
+            else:
+                x = x / x.sum()
+
+            min_w = max(0.0, float(min_w))
+            max_w = min(1.0, float(max_w))
+            if n * min_w > 1.0:
+                min_w = 1.0 / n
+            if max_w < min_w:
+                max_w = min_w
+
+            for _ in range(25):
+                x = np.clip(x, min_w, max_w)
+                s = float(x.sum())
+                if s <= 0:
+                    x = np.repeat(1.0 / n, n)
+                    break
+                x = x / s
+                if np.all(x >= (min_w - 1e-9)) and np.all(x <= (max_w + 1e-9)):
+                    break
+            return x
+
+        def _enforce_sector_cap(weights: np.ndarray, sectors: list[str], cap: float) -> np.ndarray:
+            x = np.array(weights, dtype=float)
+            if len(x) == 0:
+                return x
+            cap = float(cap)
+            for _ in range(10):
+                sec_sum: dict[str, float] = {}
+                for w, s in zip(x, sectors):
+                    sec_sum[s] = sec_sum.get(s, 0.0) + float(w)
+                offenders = [s for s, v in sec_sum.items() if v > cap + 1e-9]
+                if not offenders:
+                    break
+                excess = 0.0
+                locked = np.zeros(len(x), dtype=bool)
+                for s in offenders:
+                    idx = np.array([i for i, ss in enumerate(sectors) if ss == s], dtype=int)
+                    total = float(x[idx].sum())
+                    if total <= 0:
+                        continue
+                    target = cap
+                    factor = target / total
+                    x[idx] = x[idx] * factor
+                    excess += total - target
+                    locked[idx] = True
+                free = ~locked
+                if free.any() and excess > 0:
+                    base = x[free]
+                    if base.sum() <= 0:
+                        x[free] += excess / int(free.sum())
+                    else:
+                        x[free] += excess * (base / base.sum())
+                s_all = float(x.sum())
+                if s_all > 0:
+                    x = x / s_all
+            return x
+
+        base = _build_portfolio_suggestion_base()
+        if base is None or base.empty:
+            st.caption("Optimization unavailable because source data is missing.")
+        else:
+            df = base.copy()
+            df["Ticker"] = df["Ticker"].astype(str).str.upper().str.strip()
+            df["QualityScore"] = pd.to_numeric(df["QualityScore"], errors="coerce")
+            df["QualityTier"] = df["QualityTier"].astype(str)
+            if "Sector" not in df.columns:
+                df["Sector"] = "Unknown"
+            df["Sector"] = df["Sector"].fillna("Unknown").astype(str)
+            df = df.dropna(subset=["Ticker", "QualityScore"])
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                objective = st.selectbox("Objective", ["Max Sharpe", "Min Volatility", "Max Quality"], index=0, key="mi_opt_objective")
+            with c2:
+                lookback = int(st.selectbox("Lookback years", [1, 3, 5], index=1, key="mi_opt_lookback"))
+            with c3:
+                min_w_pct = float(st.slider("Min weight (%)", 0.0, 10.0, 0.0, 0.5, key="mi_opt_minw"))
+            with c4:
+                max_w_pct = float(st.slider("Max weight (%)", 5.0, 40.0, 15.0, 0.5, key="mi_opt_maxw"))
+
+            d1, d2, d3 = st.columns(3)
+            with d1:
+                sector_cap_pct = float(st.slider("Max sector (%)", 10.0, 60.0, 30.0, 1.0, key="mi_opt_sector_cap"))
+            with d2:
+                max_names = int(st.selectbox("Max holdings", [8, 10, 12, 15, 20], index=1, key="mi_opt_max_names"))
+            with d3:
+                use_saved = st.checkbox("Start from saved portfolio universe", value=True, key="mi_opt_use_saved")
+
+            saved_map = _latest_saved_holdings_map()
+            if use_saved and saved_map:
+                universe_tickers = set(saved_map.keys())
+                pool = df[df["Ticker"].isin(universe_tickers)].copy()
+            else:
+                pool = df.copy()
+
+            pool = pool.sort_values("QualityScore", ascending=False).head(max_names).copy()
+            if pool.empty:
+                st.caption("No candidates available after filters.")
+            else:
+                tks = tuple(pool["Ticker"].astype(str).tolist())
+                cov = _price_cov_for_tickers(tks, lookback)
+                vol_map: dict[str, float] = {}
+                if cov is not None and not cov.empty:
+                    for t in tks:
+                        if t in cov.index:
+                            v = float(max(cov.loc[t, t], 1e-8))
+                            vol_map[t] = float(np.sqrt(v))
+                for t in tks:
+                    vol_map.setdefault(t, 0.25)
+
+                qscore = pd.to_numeric(pool["QualityScore"], errors="coerce").fillna(pool["QualityScore"].median()).values.astype(float)
+                qz = (qscore - float(np.mean(qscore))) / (float(np.std(qscore)) + 1e-9)
+                mu = 0.06 + 0.08 * qz
+                vols = np.array([max(0.05, vol_map.get(t, 0.25)) for t in tks], dtype=float)
+
+                if objective == "Min Volatility":
+                    raw = 1.0 / np.maximum(vols, 1e-6)
+                elif objective == "Max Quality":
+                    raw = np.maximum(qscore, 0.0)
+                else:
+                    raw = np.maximum(mu / np.maximum(vols, 1e-6), 0.0)
+
+                w = _bounded_weights(raw, min_w_pct / 100.0, max_w_pct / 100.0)
+                w = _enforce_sector_cap(w, pool["Sector"].astype(str).tolist(), sector_cap_pct / 100.0)
+                w = _bounded_weights(w, min_w_pct / 100.0, max_w_pct / 100.0)
+
+                cur = np.array([saved_map.get(t, 0.0) / 100.0 for t in tks], dtype=float)
+                opt = np.round(w * 100.0, 1)
+                cur_pct = np.round(cur * 100.0, 1)
+                delta = np.round(opt - cur_pct, 1)
+
+                reasons = []
+                for i, t in enumerate(tks):
+                    if objective == "Min Volatility":
+                        reasons.append("Lower historical volatility contribution.")
+                    elif objective == "Max Quality":
+                        reasons.append("Higher quality score relative to peers.")
+                    else:
+                        reasons.append("Better quality-to-risk tradeoff.")
+
+                out = pool[["Ticker", "Sector", "QualityTier"]].copy()
+                out["Current (%)"] = cur_pct
+                out["Optimized (%)"] = opt
+                out["Delta (%)"] = delta
+                out["Reason"] = reasons
+                out = out.rename(columns={"QualityTier": "Tier"})
+                _render_sortable_centered_table(out, ["Current (%)", "Optimized (%)", "Delta (%)", "Tier"], page_size=10)
+
+                if st.button("Save Optimized Portfolio", key="mi_save_optimized_portfolio", use_container_width=False):
+                    out_path = DATA_DIR / "portfolio_optimized_saved.jsonl"
+                    payload = {
+                        "saved_at_utc": pd.Timestamp.utcnow().isoformat(),
+                        "objective": objective,
+                        "lookback_years": lookback,
+                        "min_weight_pct": min_w_pct,
+                        "max_weight_pct": max_w_pct,
+                        "sector_cap_pct": sector_cap_pct,
+                        "holdings": [
+                            {"Ticker": str(t), "Weight (%)": float(wp)}
+                            for t, wp in zip(tks, opt)
+                        ],
+                    }
+                    try:
+                        with open(out_path, "a", encoding="utf-8") as f:
+                            f.write(json.dumps(payload) + "\n")
+                        st.success(f"Saved to {out_path}")
+                    except Exception as e:
+                        st.error(f"Could not save optimized portfolio: {e}")
+
+
 def _show_portfolio_simulator_tab() -> None:
     title_col, act1, act2 = st.columns([3.8, 1.0, 1.0], vertical_alignment="center")
     with title_col:
@@ -2676,7 +4166,6 @@ def _show_decision_intelligence_tab() -> None:
     latest_risk_score = float("nan")
     latest_risk_date = pd.NaT
     risk_delta = float("nan")
-    risk_week_base = float("nan")
     if risk_df is not None and not risk_df.empty and {"Date", "RiskLevel"}.issubset(set(risk_df.columns)):
         ktmp = risk_df.copy()
         ktmp["Date"] = pd.to_datetime(ktmp["Date"], errors="coerce")
@@ -2693,9 +4182,9 @@ def _show_decision_intelligence_tab() -> None:
                 base = ktmp[ktmp["Date"] <= win_start]
                 if base.empty:
                     base = ktmp.head(1)
-                risk_week_base = float(base.iloc[-1].get("RiskScore")) if pd.notna(base.iloc[-1].get("RiskScore")) else float("nan")
-                if np.isfinite(risk_week_base):
-                    risk_delta = float(latest_risk_score - risk_week_base)
+                base_score = float(base.iloc[-1].get("RiskScore")) if pd.notna(base.iloc[-1].get("RiskScore")) else float("nan")
+                if np.isfinite(base_score):
+                    risk_delta = float(latest_risk_score - base_score)
 
     stocks_tracked = int(len(quality_df)) if quality_df is not None else 0
     strong = neutral = weak = 0
@@ -2704,167 +4193,121 @@ def _show_decision_intelligence_tab() -> None:
         strong = int(counts.get("Strong", 0))
         neutral = int(counts.get("Neutral", 0))
         weak = int(counts.get("Weak", 0))
-    total = max(stocks_tracked, strong + neutral + weak, 1)
-    p_strong = int(round(100 * strong / total))
-    p_neutral = int(round(100 * neutral / total))
-    p_weak = int(round(100 * weak / total))
-
-    r_week_change = "No big shifts in either direction."
-    r_week_footer = "unchanged over 7 days"
-    if regime_df is not None and not regime_df.empty and {"Date", "RegimeLabel"}.issubset(set(regime_df.columns)):
-        rw = regime_df.copy()
-        rw["Date"] = pd.to_datetime(rw["Date"], errors="coerce")
-        rw = rw.dropna(subset=["Date"]).sort_values("Date")
-        if not rw.empty:
-            win_start = rw["Date"].max() - pd.Timedelta(days=7)
-            ws = rw[rw["Date"] >= win_start]
-            if len(ws) >= 2:
-                first_lbl = str(ws.iloc[0]["RegimeLabel"])
-                last_lbl = str(ws.iloc[-1]["RegimeLabel"])
-                if first_lbl != last_lbl:
-                    r_week_change = f"Shifted from {first_lbl} to {last_lbl}."
-                    r_week_footer = "changed over 7 days"
-                else:
-                    r_week_change = f"No change — still {last_lbl}. No big shifts in either direction."
-
-    risk_week_change = "Risk trend unavailable."
-    risk_week_footer = "insufficient weekly history"
-    if np.isfinite(risk_delta) and np.isfinite(latest_risk_score):
-        if risk_delta > 0:
-            risk_week_change = f"Risk ticked up slightly. Still in {latest_risk} territory — worth watching."
-        elif risk_delta < 0:
-            risk_week_change = f"Risk eased a bit. Still in {latest_risk} territory."
-        else:
-            risk_week_change = f"Risk stayed steady in {latest_risk} territory."
-        sign = "+" if risk_delta >= 0 else "-"
-        risk_week_footer = f"{sign}{abs(risk_delta):.1f} pts  ·  now {latest_risk_score:.1f}"
-
-    conf_chip = "No strong trend"
-    if np.isfinite(latest_regime_conf):
-        conf_chip = "Confidence moderate" if float(latest_regime_conf) < 0.60 else "Confidence higher"
-
-    approach_items = [
-        (
-            "A",
-            "Stay balanced — don't over-concentrate in one stock or sector",
-            "Keep your portfolio spread out and size new positions carefully.",
-        ),
-        (
-            "B",
-            "Use this as context, not a final call",
-            "Confidence is moderate — combine with your own research and time horizon.",
-        ),
-        (
-            "C",
-            "Pair with fundamentals and valuation before acting",
-            "This signal works best as one layer of a broader decision, not a standalone trigger.",
-        ),
-    ]
 
     as_of = latest_regime_date if pd.notna(latest_regime_date) else latest_risk_date
-    as_of_txt = as_of.strftime("%B %d, %Y") if pd.notna(as_of) else "latest available date"
-    risk_score_txt = f"{latest_risk_score:.1f} / 100" if np.isfinite(latest_risk_score) else "score unavailable"
+    as_of_txt = as_of.strftime("%b %d, %Y") if pd.notna(as_of) else "latest available date"
+
+    risk_trend = "unavailable"
+    if np.isfinite(risk_delta):
+        if risk_delta > 0.25:
+            risk_trend = "rising"
+        elif risk_delta < -0.25:
+            risk_trend = "falling"
+        else:
+            risk_trend = "stable"
+
+    confidence_level = "Unknown"
+    if np.isfinite(latest_regime_conf):
+        if latest_regime_conf >= 0.70:
+            confidence_level = "High"
+        elif latest_regime_conf >= 0.55:
+            confidence_level = "Medium"
+        else:
+            confidence_level = "Low"
+
+    action_level = "Low"
+    action_text = "Monitor"
+    action_class = "diw-status-pill-low"
+    if (
+        str(latest_risk).lower() == "elevated"
+        or (np.isfinite(latest_risk_score) and latest_risk_score >= 65.0)
+    ):
+        action_level = "High"
+        action_text = "Act now"
+        action_class = "diw-status-pill-high"
+    elif (
+        str(latest_risk).lower() == "moderate"
+        or (np.isfinite(latest_risk_score) and latest_risk_score >= 35.0)
+    ):
+        action_level = "Medium"
+        action_text = "Review this week"
+        action_class = "diw-status-pill-medium"
+
+    risk_score_chip = "n/a"
+    if np.isfinite(latest_risk_score):
+        risk_score_chip = f"{latest_risk_score:.1f}"
+    risk_delta_chip = "n/a"
+    if np.isfinite(risk_delta):
+        sign = "+" if risk_delta >= 0 else "-"
+        risk_delta_chip = f"{sign}{abs(risk_delta):.1f}"
 
     snapshot_html = f"""
     <div class="diw-wrap">
       <div class="diw-head">
         <div>
           <div class="diw-kicker">Decision Intelligence</div>
-          <div class="diw-title">Market Snapshot</div>
+          <div class="diw-title">What Should I Do Now?</div>
           <div class="diw-sub">As of {html.escape(as_of_txt)}</div>
         </div>
         <div class="diw-live">Live</div>
       </div>
+      <div class="diw-status-strip">
+        <span>Market mood <strong>{html.escape(latest_regime)}</strong></span>
+        <span class="diw-sep">â€¢</span>
+        <span>Risk <strong>{html.escape(latest_risk)}</strong> ({html.escape(risk_trend)})</span>
+        <span class="diw-sep">â€¢</span>
+        <span class="diw-status-pill {action_class}">Action level: {html.escape(action_level)} - {html.escape(action_text)}</span>
+        <span class="diw-sep">â€¢</span>
+        <span>{stocks_tracked} stocks tracked</span>
+      </div>
+      <div class="diw-section-title">What Matters Right Now</div>
       <div class="diw-cards">
         <div class="diw-card diw-card-blue">
-          <div class="diw-card-k">Stocks tracked</div>
-          <div class="diw-card-v">{stocks_tracked}</div>
-          <div class="diw-card-note">across the universe</div>
-        </div>
-        <div class="diw-card diw-card-blue">
-          <div class="diw-card-k">Market mood</div>
-          <div class="diw-card-v">{html.escape(latest_regime)}</div>
-          <div class="diw-chip">{html.escape(conf_chip)}</div>
+          <div class="diw-card-k">Strong Opportunities</div>
+          <div class="diw-card-v">{strong}</div>
+          <div class="diw-card-note">High-quality names to research for new positions.</div>
         </div>
         <div class="diw-card diw-card-amber">
-          <div class="diw-card-k">System risk</div>
-          <div class="diw-card-v">{html.escape(latest_risk)}</div>
-          <div class="diw-chip diw-chip-risk">Score {html.escape(risk_score_txt)}</div>
+          <div class="diw-card-k">Weak Names</div>
+          <div class="diw-card-v">{weak}</div>
+          <div class="diw-card-note">Prioritize review for reduce/exit decisions.</div>
+        </div>
+        <div class="diw-card diw-card-blue">
+          <div class="diw-card-k">Watchlist</div>
+          <div class="diw-card-v">{neutral}</div>
+          <div class="diw-card-note">No immediate action. Monitor for rating changes.</div>
         </div>
       </div>
-      <div class="diw-section-title">Stock Quality Breakdown</div>
-      <div class="diw-breakdown">
-        <div>
-          <div class="diw-big">{stocks_tracked}</div>
-          <div class="diw-muted">stocks</div>
+      <div class="diw-section-title">Your Next Actions</div>
+      <div class="diw-action-grid">
+        <div class="diw-action-card">
+          <div class="diw-action-title">Start with strong candidates</div>
+          <div class="diw-action-copy">In a {html.escape(latest_regime)} market, focus research on the best-positioned names first.</div>
+          <div class="diw-action-meta">Confidence: {html.escape(confidence_level)}</div>
+          <div class="diw-action-cta">View top candidates</div>
         </div>
-        <div>
-          <div class="diw-muted">How many stocks are in good, average, or poor shape?</div>
-          <div class="diw-rows">
-            <div class="diw-row">
-              <div class="diw-name-strong">Strong</div>
-              <div class="diw-track"><div class="diw-fill-strong" style="width:{max(p_strong, 2)}%;"></div></div>
-              <div class="diw-right-num">{strong}</div>
-              <div class="diw-right-num">{p_strong}%</div>
-            </div>
-            <div class="diw-row">
-              <div class="diw-name-neutral">Neutral</div>
-              <div class="diw-track"><div class="diw-fill-neutral" style="width:{max(p_neutral, 2)}%;"></div></div>
-              <div class="diw-right-num">{neutral}</div>
-              <div class="diw-right-num">{p_neutral}%</div>
-            </div>
-            <div class="diw-row">
-              <div class="diw-name-weak">Weak</div>
-              <div class="diw-track"><div class="diw-fill-weak" style="width:{max(p_weak, 2)}%;"></div></div>
-              <div class="diw-right-num">{weak}</div>
-              <div class="diw-right-num">{p_weak}%</div>
-            </div>
-          </div>
+        <div class="diw-action-card">
+          <div class="diw-action-title">Review weak names you hold</div>
+          <div class="diw-action-copy">Risk is {html.escape(risk_trend)}. Re-check thesis and trim where conviction is low.</div>
+          <div class="diw-action-meta">Confidence: {html.escape(confidence_level)}</div>
+          <div class="diw-action-cta">Review holdings at risk</div>
         </div>
-      </div>
-      <div class="diw-section-title">What Changed This Week</div>
-      <div class="diw-changed">
-        <div class="diw-change-card">
-          <div class="diw-change-icon diw-icon-blue">M</div>
-          <div class="diw-change-title">Market mood</div>
-          <div class="diw-change-copy">{html.escape(r_week_change)}</div>
-          <div class="diw-change-foot">- {html.escape(r_week_footer)}</div>
+        <div class="diw-action-card">
+          <div class="diw-action-title">Check concentration</div>
+          <div class="diw-action-copy">When risk trends up, concentration hurts. Rebalance oversized positions.</div>
+          <div class="diw-action-meta">Confidence: Medium</div>
+          <div class="diw-action-cta">Review allocation</div>
         </div>
-        <div class="diw-change-card">
-          <div class="diw-change-icon diw-icon-amber">R</div>
-          <div class="diw-change-title">Risk level</div>
-          <div class="diw-change-copy">{html.escape(risk_week_change)}</div>
-          <div class="diw-change-foot {'diw-up' if np.isfinite(risk_delta) else ''}">{html.escape(risk_week_footer)}</div>
-        </div>
-      </div>
-      <div class="diw-section-title">Suggested Approach</div>
-      <div class="diw-approach">
-        <div class="diw-item">
-          <div class="diw-item-icon diw-icon-a">{approach_items[0][0]}</div>
-          <div>
-            <div class="diw-item-title">{html.escape(approach_items[0][1])}</div>
-            <div class="diw-item-copy">{html.escape(approach_items[0][2])}</div>
-          </div>
-        </div>
-        <div class="diw-item">
-          <div class="diw-item-icon diw-icon-b">{approach_items[1][0]}</div>
-          <div>
-            <div class="diw-item-title">{html.escape(approach_items[1][1])}</div>
-            <div class="diw-item-copy">{html.escape(approach_items[1][2])}</div>
-          </div>
-        </div>
-        <div class="diw-item">
-          <div class="diw-item-icon diw-icon-c">{approach_items[2][0]}</div>
-          <div>
-            <div class="diw-item-title">{html.escape(approach_items[2][1])}</div>
-            <div class="diw-item-copy">{html.escape(approach_items[2][2])}</div>
-          </div>
+        <div class="diw-action-card">
+          <div class="diw-action-title">Set a risk alert</div>
+          <div class="diw-action-copy">Current risk: {html.escape(risk_score_chip)} ({html.escape(latest_risk)}). Set an alert at 50 (High).</div>
+          <div class="diw-action-meta">Weekly change: {html.escape(risk_delta_chip)} points</div>
+          <div class="diw-action-cta">Set alert</div>
         </div>
       </div>
     </div>
     """
     st.markdown(snapshot_html, unsafe_allow_html=True)
-    st.caption("For model diagnostics and technical health tables, use the Diagnostics tab.")
 
 
 def _show_diagnostics_tab() -> None:
@@ -3065,10 +4508,41 @@ def _show_diagnostics_tab() -> None:
 
 
 def _show_explainability_tab() -> None:
-    st.markdown("## Explainability and Evidence")
-    st.caption("Artifacts are read from cache generated by the scheduled pipeline.")
+    st.markdown("## Explainability")
 
     import json
+
+    feature_name_map = {
+        "Revenue_Growth_YoY_Pct": "Revenue growth",
+        "EBITDA_Margin": "Profit margins (EBITDA)",
+        "ROE": "Returns on equity (ROE)",
+        "FreeCashFlow_Margin": "Free cash flow quality",
+        "Volatility_63D_stability": "Stable price behavior (63-day)",
+        "Drawdown_252D_stability": "Smaller drawdowns (12-month)",
+    }
+    positive_explanations = {
+        "Revenue_Growth_YoY_Pct": "Sales are growing at a healthy pace.",
+        "EBITDA_Margin": "A meaningful share of revenue converts into operating earnings.",
+        "ROE": "The company generates strong profit relative to shareholder capital.",
+        "FreeCashFlow_Margin": "Cash generation supports reinvestment and resilience.",
+        "Volatility_63D_stability": "The stock has not been unusually volatile recently.",
+        "Drawdown_252D_stability": "The stock has avoided severe peak-to-trough drops over the past year.",
+    }
+    negative_explanations = {
+        "Revenue_Growth_YoY_Pct": "Growth is soft relative to peers.",
+        "EBITDA_Margin": "Margin profile is weaker than stronger peers.",
+        "ROE": "Profitability on shareholder capital is lagging.",
+        "FreeCashFlow_Margin": "Cash conversion is less supportive than top names.",
+        "Volatility_63D_stability": "Recent price swings are elevated.",
+        "Drawdown_252D_stability": "The stock has seen a meaningful 12-month drawdown, signaling downside risk.",
+    }
+    risk_driver_text = {
+        "VolatilityExpansion": "Price swings across the market are getting larger, a sign of rising uncertainty.",
+        "CorrelationSpike": "Stocks are moving together more often, so diversification protects less than usual.",
+        "RapidDrawdown": "Some names are dropping sharply in short windows, signaling fragile sentiment.",
+        "YieldCurveInversion": "The yield curve remains inverted, which often aligns with cautious risk conditions.",
+        "RateShock": "Interest-rate moves have been abrupt, making valuation and risk pricing less stable.",
+    }
 
     qexp, _qe = read_parquet_safe(QUALITY_EXPLAIN_PATH)
     qbase, _qb = read_parquet_safe(QUALITY_CACHE_PATH)
@@ -3076,272 +4550,416 @@ def _show_explainability_tab() -> None:
     revbase, _rb = read_parquet_safe(REGIME_CACHE_PATH)
     kevid, _ke = read_parquet_safe(RISK_EVIDENCE_PATH)
     kbase, _kb = read_parquet_safe(RISK_CACHE_PATH)
-    fdf = _load_explainability_feature_union()
 
-    # Section A: Entity Explainability
-    st.markdown("### A. Entity Explainability")
-    if qexp is None or qexp.empty:
-        st.warning("Quality explanations cache missing. Showing fallback from quality scores cache when available.")
-        if qbase is None or qbase.empty:
-            st.caption("No quality score data available.")
-        else:
-            _render_explainability_table(qbase.head(50))
+    st.markdown("### 1. Why Is This Stock Rated This Way?")
+    src_quality = qexp if qexp is not None and not qexp.empty else qbase
+    if src_quality is None or src_quality.empty or "Ticker" not in src_quality.columns:
+        st.caption("No stock-level explanation data available.")
     else:
-        qexp = qexp.copy()
-        qexp["Ticker"] = qexp["Ticker"].astype(str).str.upper().str.strip()
-        tickers = sorted(qexp["Ticker"].dropna().unique().tolist())
-        t = st.selectbox("Ticker", options=tickers, index=0, key="xpl_ticker")
-        row = qexp[qexp["Ticker"] == t].head(1).iloc[0]
+        q = src_quality.copy()
+        q["Ticker"] = q["Ticker"].astype(str).str.upper().str.strip()
+        tickers = sorted(q["Ticker"].dropna().unique().tolist())
+        ticker = st.selectbox("Stock", options=tickers, index=0, key="xpl_ticker")
+        row = q[q["Ticker"] == ticker].tail(1).iloc[0]
 
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.metric("QualityScore", f"{float(row.get('QualityScore', 0.0)):.2f}")
-        with c2:
-            st.metric("QualityTier", str(row.get("QualityTier", "Unknown")))
-        with c3:
-            st.metric("FeatureAsOfDate", str(row.get("FeatureAsOfDate", "Unknown")))
-        st.caption(f"Top positive drivers: {row.get('TopPositiveDrivers', 'None')}")
-        st.caption(f"Top negative drivers: {row.get('TopNegativeDrivers', 'None')}")
+        score = float(pd.to_numeric(row.get("QualityScore"), errors="coerce")) if pd.notna(row.get("QualityScore")) else float("nan")
+        tier = str(row.get("QualityTier", "Unknown"))
+        as_of = str(row.get("FeatureAsOfDate", "latest"))
+        if (as_of == "latest" or as_of.lower() == "unknown") and "Date" in q.columns:
+            dtmp = pd.to_datetime(q[q["Ticker"] == ticker]["Date"], errors="coerce").dropna()
+            if not dtmp.empty:
+                as_of = dtmp.max().strftime("%b %d, %Y")
+        score_txt = f"{score:.1f}" if np.isfinite(score) else "n/a"
 
-        contrib_map = {}
-        try:
-            contrib_map = json.loads(str(row.get("ContributionJSON", "{}")))
-        except Exception:
-            contrib_map = {}
-        cdf = pd.DataFrame([{"Feature": k, "SignedContribution": float(v)} for k, v in contrib_map.items()])
-        if not cdf.empty:
-            cdf["AbsContribution"] = cdf["SignedContribution"].abs()
-            cdf = cdf.sort_values("AbsContribution", ascending=False).drop(columns=["AbsContribution"])
-            _render_explainability_table(cdf)
-            top_feats = cdf["Feature"].head(3).tolist()
-            if not fdf.empty:
-                raw_vals = []
-                fm = fdf.set_index("Ticker")
-                if t in fm.index:
-                    for feat in top_feats:
-                        base_feat = feat.replace("_stability", "")
-                        val = fm.loc[t].get(base_feat) if base_feat in fm.columns else None
-                        raw_vals.append({"Feature": feat, "RawValue": val})
-                    st.markdown("#### Evidence Card")
-                    _render_explainability_table(_format_evidence_card_table(pd.DataFrame(raw_vals)))
+        marker = 50.0 if not np.isfinite(score) else max(0.0, min(100.0, score))
+        st.markdown(
+            f"""
+            <div class="diw-breakdown" style="grid-template-columns: 1fr; gap: 10px;">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+                <div>
+                  <div class="diw-title" style="font-size:1.8rem;">{html.escape(ticker)}</div>
+                  <div class="diw-muted">As of {html.escape(as_of)} - <span class="diw-chip">{html.escape(tier)}</span></div>
+                </div>
+                <div style="text-align:right;">
+                  <div class="diw-title" style="font-size:2rem;">{html.escape(score_txt)}</div>
+                  <div class="diw-muted">Quality score / 100</div>
+                </div>
+              </div>
+              <div style="position:relative; height:10px; border-radius:999px; background:linear-gradient(90deg,#ff5e5e 0%,#f1b434 50%,#21c896 100%);">
+                <div style="position:absolute; left:calc({marker}% - 2px); top:-6px; width:4px; height:22px; background:#f3f6fd; border-radius:4px;"></div>
+              </div>
+              <div style="display:flex; justify-content:space-between;" class="diw-muted">
+                <span>Weak</span><span>Strong</span>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    # Section B: Regime Evidence
-    st.markdown("### B. Operating Environment Evidence")
+        pos_raw = [x.strip() for x in str(row.get("TopPositiveDrivers", "None")).split(",") if x.strip() and x.strip().lower() != "none"]
+        neg_raw = [x.strip() for x in str(row.get("TopNegativeDrivers", "None")).split(",") if x.strip() and x.strip().lower() != "none"]
+
+        contrib = {}
+        if "ContributionJSON" in row:
+            try:
+                contrib = json.loads(str(row.get("ContributionJSON", "{}")))
+            except Exception:
+                contrib = {}
+        if not pos_raw and contrib:
+            pos_raw = [k for k, v in sorted(contrib.items(), key=lambda kv: float(kv[1]), reverse=True) if float(v) > 0][:3]
+        if not neg_raw and contrib:
+            neg_raw = [k for k, v in sorted(contrib.items(), key=lambda kv: float(kv[1])) if float(v) < 0][:3]
+
+        st.markdown("#### What's Helping This Stock")
+        if not pos_raw:
+            st.caption("No strong positive drivers were detected.")
+        else:
+            for feat in pos_raw[:3]:
+                label = feature_name_map.get(feat, feat.replace("_", " "))
+                expl = positive_explanations.get(feat, "This factor is currently supporting the score.")
+                st.markdown(f"- **{label}**: {expl}")
+
+        st.markdown("#### What's Holding It Back")
+        if not neg_raw:
+            st.caption("No major negative drivers were detected.")
+        else:
+            for feat in neg_raw[:3]:
+                label = feature_name_map.get(feat, feat.replace("_", " "))
+                expl = negative_explanations.get(feat, "This factor is currently limiting the score.")
+                st.markdown(f"- **{label}**: {expl}")
+
+    st.markdown("### 2. What Is The Market Doing Right Now?")
     src_regime = revid if revid is not None and not revid.empty else revbase
     if src_regime is None or src_regime.empty:
-        st.caption("No regime evidence available.")
+        st.caption("No market-regime data available.")
     else:
         r = src_regime.copy()
         r["Date"] = pd.to_datetime(r["Date"], errors="coerce")
         r = r.dropna(subset=["Date"]).sort_values("Date")
-        date_opts = [d.strftime("%Y-%m-%d") for d in r["Date"].tolist()]
-        sel = st.selectbox("Regime date", options=date_opts, index=len(date_opts) - 1, key="xpl_regime_date")
-        rr = r[r["Date"] == pd.to_datetime(sel)].tail(1).iloc[0]
+        rr = r.tail(1).iloc[0]
+        mood = str(rr.get("RegimeLabel", "Unknown"))
+        conf = float(pd.to_numeric(rr.get("ConfidenceScore"), errors="coerce")) if "ConfidenceScore" in rr else float("nan")
+        conf_pct = int(round(conf * 100)) if np.isfinite(conf) else None
+        if not np.isfinite(conf):
+            conf_txt = "Confidence unavailable"
+        elif conf >= 0.70:
+            conf_txt = f"High confidence ({conf_pct}%)"
+        elif conf >= 0.55:
+            conf_txt = f"Moderate confidence ({conf_pct}%) - treat as context, not a hard call"
+        else:
+            conf_txt = f"Low confidence ({conf_pct}%) - avoid large one-shot moves"
+        updated = rr["Date"].strftime("%b %d, %Y")
+
+        explanation = {
+            "Risk On": "The backdrop is supportive for risk assets. Favor adding in measured steps rather than all at once.",
+            "Risk Off": "Conditions are defensive. Focus on risk control, position sizing, and downside protection.",
+            "Neutral": "Neither strong risk-on nor risk-off conditions are present. A wait-and-see posture is appropriate.",
+        }.get(mood, "Market signal is mixed. Use your portfolio rules and avoid overreacting to one data point.")
+
         c1, c2 = st.columns(2)
         with c1:
-            st.metric("RegimeLabel", str(rr.get("RegimeLabel", "Unknown")))
+            st.markdown(f"**Market mood**\n\n### {mood}")
         with c2:
-            if "ConfidenceScore" in rr:
-                st.metric("ConfidenceScore", f"{float(rr.get('ConfidenceScore', 0.0)):.2f}")
+            st.markdown(f"**Signal confidence**\n\n### {conf_txt}")
+        st.caption(explanation)
+        st.caption(f"Updated {updated}")
 
-        st.caption(f"RuleTriggered: {rr.get('RuleTriggered', 'N/A')}")
-        st.caption(f"{rr.get('ShortExplanation', 'No explanation available.')}")
-
-        evjson = rr.get("EvidencePointsJSON", "{}")
-        try:
-            evmap = json.loads(str(evjson))
-        except Exception:
-            evmap = {}
-        if evmap:
-            edt = pd.DataFrame([{"Indicator": k, "Value": v} for k, v in evmap.items()])
-            _render_explainability_table(_format_evidence_points_table(edt))
-
-    # Section C: Systemic Risk Evidence
-    st.markdown("### C. Systemic Risk Evidence")
+    st.markdown("### 3. How Risky Is The Overall Environment?")
     src_risk = kevid if kevid is not None and not kevid.empty else kbase
     if src_risk is None or src_risk.empty:
-        st.caption("No risk evidence available.")
+        st.caption("No market-risk data available.")
     else:
         k = src_risk.copy()
         k["Date"] = pd.to_datetime(k["Date"], errors="coerce")
         k = k.dropna(subset=["Date"]).sort_values("Date")
-        date_opts = [d.strftime("%Y-%m-%d") for d in k["Date"].tolist()]
-        sel = st.selectbox("Risk date", options=date_opts, index=len(date_opts) - 1, key="xpl_risk_date")
-        lookback_days = st.slider("Last N days", min_value=30, max_value=365, value=120, step=10, key="xpl_risk_lookback")
-        kr = k[k["Date"] == pd.to_datetime(sel)].tail(1).iloc[0]
+        kr = k.tail(1).iloc[0]
 
-        c1, c2 = st.columns(2)
-        with c1:
-            if "RiskScore" in kr:
-                st.metric("RiskScore", f"{float(kr.get('RiskScore', 0.0)):.2f}")
-        with c2:
-            st.metric("RiskLevel", str(kr.get("RiskLevel", "Unknown")))
-        if "TopRiskDrivers" in kr:
-            st.caption(f"TopRiskDrivers: {kr.get('TopRiskDrivers')}")
-        if "ShortExplanation" in kr:
-            st.caption(str(kr.get("ShortExplanation")))
+        risk_score = float(pd.to_numeric(kr.get("RiskScore"), errors="coerce")) if "RiskScore" in kr else float("nan")
+        risk_level = str(kr.get("RiskLevel", "Unknown"))
+        updated = kr["Date"].strftime("%b %d, %Y")
+        risk_score_txt = f"{risk_score:.1f} / 100" if np.isfinite(risk_score) else "n/a"
+        st.markdown(f"### {risk_level} risk  -  {risk_score_txt}")
+        st.caption(f"Updated {updated}")
 
-        evjson = kr.get("EvidencePointsJSON", "{}")
-        try:
-            evmap = json.loads(str(evjson))
-        except Exception:
-            evmap = {}
-        if evmap:
-            edt = pd.DataFrame([{"Indicator": k2, "Value": v2} for k2, v2 in evmap.items()])
-            _render_explainability_table(_format_evidence_points_table(edt))
-
-        ktail = k.tail(int(lookback_days)).copy()
-        if "RiskScore" in ktail.columns:
-            st.line_chart(ktail.set_index("Date")[["RiskScore"]])
-
-        ind_options = [c for c in ["VolatilityExpansion", "RapidDrawdown", "CorrelationSpike", "YieldCurveInversion", "RateShock"] if c in evmap]
-        if ind_options:
-            indicator = st.selectbox("Underlying indicator", options=ind_options, index=0, key="xpl_indicator")
-            ser_rows = []
-            for _, row in ktail.iterrows():
+        evmap = {}
+        if "EvidencePointsJSON" in kr:
+            try:
+                evmap = json.loads(str(kr.get("EvidencePointsJSON", "{}")))
+            except Exception:
+                evmap = {}
+        drivers_order = ["VolatilityExpansion", "CorrelationSpike", "RapidDrawdown", "YieldCurveInversion", "RateShock"]
+        shown = 0
+        st.markdown("#### What's Driving The Risk")
+        for key in drivers_order:
+            val = evmap.get(key)
+            if isinstance(val, bool):
+                active = val
+            else:
                 try:
-                    m = json.loads(str(row.get("EvidencePointsJSON", "{}")))
-                    ser_rows.append({"Date": row["Date"], "Value": m.get(indicator)})
+                    active = float(val) > 0
                 except Exception:
-                    continue
-            sdt = pd.DataFrame(ser_rows).dropna()
-            if not sdt.empty:
-                st.line_chart(sdt.set_index("Date")[["Value"]].rename(columns={"Value": indicator}))
+                    active = False
+            if not active:
+                continue
+            shown += 1
+            label = {
+                "VolatilityExpansion": "Volatility expanding",
+                "CorrelationSpike": "Stocks moving together",
+                "RapidDrawdown": "Fast drawdowns occurring",
+                "YieldCurveInversion": "Yield curve inverted",
+                "RateShock": "Rate shocks",
+            }.get(key, key)
+            st.markdown(f"- **{label}**: {risk_driver_text.get(key, 'This factor is contributing to current risk conditions.')}")
+            if shown >= 3:
+                break
+        if shown == 0:
+            st.caption("No dominant risk driver is currently standing out.")
+
+        if "RiskScore" in k.columns:
+            trend = k[["Date", "RiskScore"]].copy()
+            trend["RiskScore"] = pd.to_numeric(trend["RiskScore"], errors="coerce")
+            trend = trend.dropna(subset=["RiskScore"]).sort_values("Date")
+            if not trend.empty:
+                trend = trend[trend["Date"] >= (trend["Date"].max() - pd.Timedelta(days=183))]
+                st.markdown("#### Risk Score Trend (Last 6 Months)")
+                ch = (
+                    alt.Chart(trend)
+                    .mark_line(color="#ffb64b", strokeWidth=3)
+                    .encode(
+                        x=alt.X("Date:T", title=None),
+                        y=alt.Y("RiskScore:Q", title=None, scale=alt.Scale(domain=[0, 100])),
+                        tooltip=[alt.Tooltip("Date:T", title="Date"), alt.Tooltip("RiskScore:Q", title="Risk", format=".1f")],
+                    )
+                    .properties(height=180)
+                )
+                st.altair_chart(ch, use_container_width=True)
 
 
 def _show_uncertainty_tab() -> None:
     st.markdown("## Uncertainty and Confidence")
-    st.caption("Artifacts are read from cache generated by the scheduled pipeline.")
 
     qu, _qe = read_parquet_safe(QUALITY_UNCERTAINTY_PATH)
-    rp, _re = read_parquet_safe(REGIME_PROB_PATH)
-    ru, _ru = read_parquet_safe(RISK_UNCERTAINTY_PATH)
     qbase, _qb = read_parquet_safe(QUALITY_CACHE_PATH)
+    rp, _re = read_parquet_safe(REGIME_PROB_PATH)
     rbase, _rb = read_parquet_safe(REGIME_CACHE_PATH)
+    ru, _ru = read_parquet_safe(RISK_UNCERTAINTY_PATH)
     kbase, _kb = read_parquet_safe(RISK_CACHE_PATH)
 
-    # Section A
-    st.markdown("### A. QualityScore Uncertainty")
+    def _confidence_badge(value: float) -> tuple[str, str]:
+        if not np.isfinite(value):
+            return "Uncertain", "#ede6d6"
+        if value >= 0.80:
+            return "Very confident", "#dff4ec"
+        if value >= 0.60:
+            return "Moderate", "#f3ecd9"
+        return "Less certain", "#f3e2dd"
+
+    # 1) Stock confidence
+    st.markdown("### How Confident Is The Model About This Stock?")
     src_q = qu if qu is not None and not qu.empty else qbase
-    if src_q is None or src_q.empty:
-        st.caption("Quality uncertainty cache missing and no quality score fallback available.")
+    if src_q is None or src_q.empty or "Ticker" not in src_q.columns:
+        st.caption("No stock uncertainty data available.")
     else:
         q = src_q.copy()
         q["Ticker"] = q["Ticker"].astype(str).str.upper().str.strip()
         tickers = sorted(q["Ticker"].dropna().unique().tolist())
-        t = st.selectbox("Ticker", options=tickers, index=0, key="unc_ticker")
-        row = q[q["Ticker"] == t].head(1).iloc[0]
+        t = st.selectbox("Stock", options=tickers, index=0, key="unc_ticker")
+        row = q[q["Ticker"] == t].tail(1).iloc[0]
 
-        if {"ScoreP10", "ScoreP50", "ScoreP90", "TierMostLikely", "TierStability"}.issubset(set(q.columns)):
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                st.metric("ScoreP10", f"{float(row['ScoreP10']):.2f}")
-            with c2:
-                st.metric("ScoreP50", f"{float(row['ScoreP50']):.2f}")
-            with c3:
-                st.metric("ScoreP90", f"{float(row['ScoreP90']):.2f}")
-            with c4:
-                st.metric("TierStability", f"{float(row['TierStability']):.2f}")
-            st.caption(
-                f"TierMostLikely: {row.get('TierMostLikely', 'Unknown')}. "
-                f"Tier stability is {float(row.get('TierStability', 0.0)):.2f}, "
-                "which indicates how stable the tier is under feature noise."
-            )
-            show_chart = st.checkbox("Show uncertainty band chart", value=True, key="unc_show_q_chart")
-            if show_chart:
-                band_df = pd.DataFrame(
-                    {
-                        "Level": ["P10", "P50", "P90"],
-                        "Score": [float(row["ScoreP10"]), float(row["ScoreP50"]), float(row["ScoreP90"])],
-                    }
-                )
-                st.bar_chart(band_df.set_index("Level"))
-        else:
-            st.warning("Uncertainty cache missing. Showing point estimate only.")
-            st.metric("QualityScore", f"{float(row.get('QualityScore', 0.0)):.2f}")
+        point = float(pd.to_numeric(row.get("ScoreP50"), errors="coerce")) if "ScoreP50" in row else float(pd.to_numeric(row.get("QualityScore"), errors="coerce"))
+        p10 = float(pd.to_numeric(row.get("ScoreP10"), errors="coerce")) if "ScoreP10" in row else float("nan")
+        p90 = float(pd.to_numeric(row.get("ScoreP90"), errors="coerce")) if "ScoreP90" in row else float("nan")
+        tier = str(row.get("TierMostLikely", row.get("QualityTier", "Neutral")))
+        stability = float(pd.to_numeric(row.get("TierStability"), errors="coerce")) if "TierStability" in row else float("nan")
+        confidence_base = stability if np.isfinite(stability) else (1.0 - min(1.0, ((p90 - p10) / 20.0 if np.isfinite(p10) and np.isfinite(p90) else 0.5)))
+        conf_lbl, conf_bg = _confidence_badge(confidence_base)
 
-    # Section B
-    st.markdown("### B. Regime Probabilities")
+        marker = max(48.0, min(58.0, point if np.isfinite(point) else 53.0))
+        low = p10 if np.isfinite(p10) else max(48.0, marker - 1.0)
+        high = p90 if np.isfinite(p90) else min(58.0, marker + 1.0)
+        swing = (high - low) / 2.0
+        stable_txt = f"{int(round(max(0, min(100, confidence_base * 100))))}%"
+        st.markdown(
+            f"""
+            <div class="diw-breakdown" style="grid-template-columns: 1fr; gap: 10px;">
+              <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
+                <div>
+                  <div class="diw-title" style="font-size:1.8rem;">{html.escape(t)} <span class="diw-chip">{html.escape(tier)}</span></div>
+                  <div class="diw-muted">Quality score: {point:.1f} / 100</div>
+                </div>
+                <div style="padding:4px 12px; border-radius:999px; background:{conf_bg}; color:#1b4d3f; font-weight:700;">{conf_lbl}</div>
+              </div>
+              <div class="diw-muted" style="font-weight:700;">SCORE RANGE UNDER DIFFERENT SCENARIOS</div>
+              <div style="position:relative; height:14px; border-radius:999px; background:#1b2230;">
+                <div style="position:absolute; left:{((low-48)/10)*100:.1f}%; width:{max(3.0, ((high-low)/10)*100):.1f}%; top:0; bottom:0; border-radius:999px; background:#2f5e8d;"></div>
+                <div style="position:absolute; left:{((marker-48)/10)*100:.1f}%; top:-4px; width:10px; height:22px; border-radius:8px; background:#edf3ff;"></div>
+              </div>
+              <div style="display:flex; justify-content:space-between;" class="diw-muted"><span>48</span><span>50</span><span>52</span><span>54</span><span>56</span><span>58</span></div>
+              <div class="diw-muted">Likely range ({low:.1f} - {high:.1f})  ·  Most likely score ({marker:.1f})</div>
+              <div style="border-top:1px solid rgba(135,162,196,0.24); padding-top:10px; color:#d1def4;">
+                Even in weaker simulated scenarios, the score stays close to the current reading. The <b>{html.escape(tier)}</b> rating appears relatively stable.
+              </div>
+              <div style="display:flex; gap:10px;">
+                <div style="padding:8px 12px; border:1px solid rgba(135,162,196,0.30); border-radius:10px; background:rgba(10,22,41,0.45);">Rating stability <b>{stable_txt}</b></div>
+                <div style="padding:8px 12px; border:1px solid rgba(135,162,196,0.30); border-radius:10px; background:rgba(10,22,41,0.45);">Score swing <b>±{swing:.1f} pts</b></div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # 2) Market mood confidence
+    st.markdown("### How Sure Is The Model About The Market Mood?")
     src_r = rp if rp is not None and not rp.empty else rbase
     if src_r is None or src_r.empty:
-        st.caption("Regime probabilities cache missing and no regime fallback available.")
+        st.caption("No regime probability data available.")
     else:
         r = src_r.copy()
         r["Date"] = pd.to_datetime(r["Date"], errors="coerce")
         r = r.dropna(subset=["Date"]).sort_values("Date")
-        dates = [d.strftime("%Y-%m-%d") for d in r["Date"].tolist()]
-        sel = st.selectbox("Regime probability date", options=dates, index=len(dates) - 1, key="unc_regime_date")
-        row = r[r["Date"] == pd.to_datetime(sel)].tail(1).iloc[0]
+        row = r.tail(1).iloc[0]
 
-        c1, c2 = st.columns(2)
-        with c1:
-            st.metric("RegimeLabel", str(row.get("RegimeLabel", "Unknown")))
-        with c2:
-            st.metric("ConfidenceScore", f"{float(row.get('ConfidenceScore', 0.0)):.2f}")
+        p_on = float(pd.to_numeric(row.get("P_RiskOn"), errors="coerce")) if "P_RiskOn" in row else float("nan")
+        p_neu = float(pd.to_numeric(row.get("P_Neutral"), errors="coerce")) if "P_Neutral" in row else float("nan")
+        p_off = float(pd.to_numeric(row.get("P_RiskOff"), errors="coerce")) if "P_RiskOff" in row else float("nan")
+        if not (np.isfinite(p_on) and np.isfinite(p_neu) and np.isfinite(p_off)):
+            conf = float(pd.to_numeric(row.get("ConfidenceScore"), errors="coerce"))
+            mood = str(row.get("RegimeLabel", "Neutral"))
+            p_on = conf if mood == "Risk On" and np.isfinite(conf) else 0.2
+            p_neu = conf if mood == "Neutral" and np.isfinite(conf) else 0.5
+            p_off = conf if mood == "Risk Off" and np.isfinite(conf) else 0.3
+        probs = {"Risk-on": max(0.0, p_on), "Neutral": max(0.0, p_neu), "Risk-off": max(0.0, p_off)}
+        mood = max(probs, key=probs.get)
+        conf_val = probs[mood]
+        conf_lbl, conf_bg = _confidence_badge(conf_val)
 
-        if {"P_RiskOn", "P_Neutral", "P_RiskOff"}.issubset(set(r.columns)):
-            prob_df = pd.DataFrame(
-                [
-                    {"Regime": "Risk On", "Probability": float(row["P_RiskOn"])},
-                    {"Regime": "Neutral", "Probability": float(row["P_Neutral"])},
-                    {"Regime": "Risk Off", "Probability": float(row["P_RiskOff"])},
-                ]
-            )
-            _render_sortable_centered_table(prob_df, ["Probability"])
-            st.bar_chart(prob_df.set_index("Regime"))
-            if "RegimeStability_20d" in row:
-                st.caption(f"RegimeStability_20d: {float(row['RegimeStability_20d']):.2f}")
-        else:
-            st.warning("Probability cache missing. Showing only point label and confidence.")
+        # consecutive stable days
+        streak = 1
+        if "RegimeLabel" in r.columns and len(r) > 1:
+            labels = r["RegimeLabel"].astype(str).tolist()
+            last = labels[-1]
+            for lbl in reversed(labels[:-1]):
+                if lbl == last:
+                    streak += 1
+                else:
+                    break
 
-    # Section C
-    st.markdown("### C. Risk Uncertainty")
+        st.markdown(
+            f"""
+            <div class="diw-breakdown" style="grid-template-columns: 1fr; gap: 10px;">
+              <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
+                <div>
+                  <div class="diw-title" style="font-size:1.9rem;">Market mood: {html.escape(mood)}</div>
+                  <div class="diw-muted">The model sees {'no clear bullish or bearish signal right now' if mood=='Neutral' else ('risk-on bias' if mood=='Risk-on' else 'risk-off pressure')}.</div>
+                </div>
+                <div style="padding:4px 12px; border-radius:999px; background:{conf_bg}; color:#5c3f12; font-weight:700;">{conf_lbl}</div>
+              </div>
+              <div class="diw-muted" style="font-weight:700;">PROBABILITY OF EACH SCENARIO</div>
+              <div style="display:grid; grid-template-columns: 120px 1fr 70px; gap:10px; align-items:center;">
+                <div>Neutral</div><div style="height:12px;background:#1b2230;border-radius:999px;"><div style="height:12px;width:{probs['Neutral']*100:.1f}%;background:#4b9bff;border-radius:999px;"></div></div><div style="text-align:right;">{probs['Neutral']*100:.0f}%</div>
+                <div>Risk-off</div><div style="height:12px;background:#1b2230;border-radius:999px;"><div style="height:12px;width:{probs['Risk-off']*100:.1f}%;background:#d65a5a;border-radius:999px;"></div></div><div style="text-align:right;">{probs['Risk-off']*100:.0f}%</div>
+                <div>Risk-on</div><div style="height:12px;background:#1b2230;border-radius:999px;"><div style="height:12px;width:{probs['Risk-on']*100:.1f}%;background:#2aa37a;border-radius:999px;"></div></div><div style="text-align:right;">{probs['Risk-on']*100:.0f}%</div>
+              </div>
+              <div style="border-top:1px solid rgba(135,162,196,0.24); padding-top:10px; color:#d1def4;">
+                Confidence is {conf_lbl.lower()} at {conf_val*100:.0f}% - meaning the model leans {html.escape(mood)} but still allows for alternative scenarios.
+              </div>
+              <div style="padding:8px 12px; display:inline-block; border:1px solid rgba(135,162,196,0.30); border-radius:10px; background:rgba(10,22,41,0.45);">Mood stable for <b>{streak}</b> days</div>
+              <div class="diw-muted">Updated {row['Date'].strftime('%b %d, %Y')}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # 3) Risk confidence
+    st.markdown("### How Sure Is The Model About The Risk Level?")
     src_k = ru if ru is not None and not ru.empty else kbase
     if src_k is None or src_k.empty:
-        st.caption("Risk uncertainty cache missing and no risk fallback available.")
+        st.caption("No risk uncertainty data available.")
     else:
         k = src_k.copy()
         k["Date"] = pd.to_datetime(k["Date"], errors="coerce")
         k = k.dropna(subset=["Date"]).sort_values("Date")
-        dates = [d.strftime("%Y-%m-%d") for d in k["Date"].tolist()]
-        sel = st.selectbox("Risk uncertainty date", options=dates, index=len(dates) - 1, key="unc_risk_date")
-        lookback = st.slider("Last N days", min_value=30, max_value=365, value=60, step=10, key="unc_risk_lookback")
-        row = k[k["Date"] == pd.to_datetime(sel)].tail(1).iloc[0]
+        row = k.tail(1).iloc[0]
+        risk_level = str(row.get("RiskLevelMostLikely", row.get("RiskLevel", "Moderate")))
+        r_mid = float(pd.to_numeric(row.get("RiskP50"), errors="coerce")) if "RiskP50" in row else float(pd.to_numeric(row.get("RiskScore"), errors="coerce"))
+        r_low = float(pd.to_numeric(row.get("RiskP10"), errors="coerce")) if "RiskP10" in row else max(0.0, r_mid - 4.0)
+        r_high = float(pd.to_numeric(row.get("RiskP90"), errors="coerce")) if "RiskP90" in row else min(100.0, r_mid + 4.0)
+        r_swing = (r_high - r_low) / 2.0
+        r_stability = float(pd.to_numeric(row.get("RiskLevelStability"), errors="coerce")) if "RiskLevelStability" in row else float("nan")
+        confidence_base = r_stability if np.isfinite(r_stability) else max(0.0, 1.0 - min(1.0, (r_swing / 10.0)))
+        conf_lbl, conf_bg = _confidence_badge(confidence_base)
 
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            st.metric("RiskScore", f"{float(row.get('RiskScore', 0.0)):.2f}")
-        if {"RiskP10", "RiskP50", "RiskP90"}.issubset(set(k.columns)):
-            with c2:
-                st.metric("RiskP10", f"{float(row.get('RiskP10', 0.0)):.2f}")
-            with c3:
-                st.metric("RiskP50", f"{float(row.get('RiskP50', 0.0)):.2f}")
-            with c4:
-                st.metric("RiskP90", f"{float(row.get('RiskP90', 0.0)):.2f}")
-            st.caption(
-                f"RiskLevelMostLikely: {row.get('RiskLevelMostLikely', 'Unknown')} | "
-                f"RiskLevelStability: {float(row.get('RiskLevelStability', 0.0)):.2f}"
+        axis_min, axis_max = 20.0, 50.0
+        marker = max(axis_min, min(axis_max, r_mid if np.isfinite(r_mid) else 35.0))
+        low = max(axis_min, min(axis_max, r_low))
+        high = max(axis_min, min(axis_max, r_high))
+        st.markdown(
+            f"""
+            <div class="diw-breakdown" style="grid-template-columns: 1fr; gap: 10px;">
+              <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
+                <div>
+                  <div class="diw-title" style="font-size:1.9rem;">Market risk: {html.escape(risk_level)}</div>
+                  <div class="diw-muted">Risk score most likely around {marker:.1f} / 100</div>
+                </div>
+                <div style="padding:4px 12px; border-radius:999px; background:{conf_bg}; color:#5c3f12; font-weight:700;">{conf_lbl}</div>
+              </div>
+              <div class="diw-muted" style="font-weight:700;">RISK SCORE RANGE UNDER DIFFERENT SCENARIOS</div>
+              <div style="position:relative; height:14px; border-radius:999px; background:#1b2230;">
+                <div style="position:absolute; left:{((low-axis_min)/(axis_max-axis_min))*100:.1f}%; width:{max(3.0, ((high-low)/(axis_max-axis_min))*100):.1f}%; top:0; bottom:0; border-radius:999px; background:#a66f18;"></div>
+                <div style="position:absolute; left:{((marker-axis_min)/(axis_max-axis_min))*100:.1f}%; top:-4px; width:10px; height:22px; border-radius:8px; background:#f3d8a5;"></div>
+              </div>
+              <div style="display:flex; justify-content:space-between;" class="diw-muted"><span>20</span><span>25</span><span>30</span><span>35</span><span>40</span><span>45</span><span>50</span></div>
+              <div class="diw-muted">Likely range ({low:.1f} - {high:.1f})  ·  Most likely ({marker:.1f})</div>
+              <div style="border-top:1px solid rgba(135,162,196,0.24); padding-top:10px; color:#d1def4;">
+                The risk level is {conf_lbl.lower()} than the stock quality rating. In a pessimistic scenario it can move toward the upper end of the range.
+              </div>
+              <div style="display:flex; gap:10px;">
+                <div style="padding:8px 12px; border:1px solid rgba(135,162,196,0.30); border-radius:10px; background:rgba(10,22,41,0.45);">Rating stability <b>{int(round(max(0,min(100,confidence_base*100))))}%</b></div>
+                <div style="padding:8px 12px; border:1px solid rgba(135,162,196,0.30); border-radius:10px; background:rgba(10,22,41,0.45);">Score swing <b>±{r_swing:.1f} pts</b></div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        trend = k[["Date"]].copy()
+        trend["RiskScore"] = pd.to_numeric(k.get("RiskScore"), errors="coerce")
+        trend["RiskP10"] = pd.to_numeric(k.get("RiskP10"), errors="coerce")
+        trend["RiskP90"] = pd.to_numeric(k.get("RiskP90"), errors="coerce")
+        trend = trend.dropna(subset=["Date"]).sort_values("Date")
+        trend = trend[trend["Date"] >= (trend["Date"].max() - pd.Timedelta(days=90))]
+        if not trend.empty and trend["RiskScore"].notna().any():
+            st.markdown("#### Risk Score Trend - Last 90 Days (With Uncertainty Band)")
+            line = alt.Chart(trend.dropna(subset=["RiskScore"])).mark_line(color="#d08a1f", strokeWidth=3).encode(
+                x=alt.X("Date:T", title=None),
+                y=alt.Y("RiskScore:Q", title=None, scale=alt.Scale(domain=[0, 100])),
+                tooltip=[alt.Tooltip("Date:T", title="Date"), alt.Tooltip("RiskScore:Q", title="Risk", format=".1f")],
             )
-            tail = k.tail(int(lookback)).copy()
-            if {"RiskP10", "RiskP90"}.issubset(set(tail.columns)):
-                plot_df = tail[["Date", "RiskScore", "RiskP10", "RiskP90"]].dropna()
-                line = alt.Chart(plot_df).mark_line(color="#ff9f43").encode(x="Date:T", y="RiskScore:Q")
-                band = alt.Chart(plot_df).mark_area(opacity=0.2, color="#ff9f43").encode(
+            if trend["RiskP10"].notna().any() and trend["RiskP90"].notna().any():
+                band = alt.Chart(trend.dropna(subset=["RiskP10", "RiskP90"])).mark_area(opacity=0.16, color="#d08a1f").encode(
                     x="Date:T",
                     y="RiskP10:Q",
                     y2="RiskP90:Q",
                 )
-                st.altair_chart((band + line).properties(height=280), use_container_width=True)
-        else:
-            st.warning("Uncertainty cache missing. Showing only point estimate.")
-            st.caption(f"RiskLevel: {row.get('RiskLevel', 'Unknown')}")
+                st.altair_chart((band + line).properties(height=220), use_container_width=True)
+            else:
+                st.altair_chart(line.properties(height=220), use_container_width=True)
+        st.caption(f"Updated {row['Date'].strftime('%b %d, %Y')}")
 
 
 def _show_monitoring_tab() -> None:
     st.markdown("## Drift, Monitoring, and Early Warning")
-    st.caption("Artifacts are read from cache generated by the scheduled pipeline.")
 
     import json
+
+    def _norm_dates(df: pd.DataFrame | None) -> pd.DataFrame:
+        if df is None or df.empty:
+            return pd.DataFrame()
+        out = df.copy()
+        if "Date" in out.columns:
+            out["Date"] = pd.to_datetime(out["Date"], errors="coerce", utc=True).dt.tz_localize(None)
+            out = out.dropna(subset=["Date"])
+        return out
 
     drift_df, _de = read_parquet_safe(DRIFT_SIGNALS_PATH)
     drift_hist_df, _dh = read_parquet_safe(DRIFT_SIGNALS_HISTORY_PATH)
@@ -3349,346 +4967,330 @@ def _show_monitoring_tab() -> None:
     regime_df, _re = read_parquet_safe(REGIME_CACHE_PATH)
     risk_df, _rk = read_parquet_safe(RISK_CACHE_PATH)
 
-    if drift_df is None or drift_df.empty:
-        st.warning("Monitoring artifacts missing. Run pipeline with run_monitoring=True.")
+    drift_df = _norm_dates(drift_df)
+    drift_hist_df = _norm_dates(drift_hist_df)
+    alert_df = _norm_dates(alert_df)
+    regime_df = _norm_dates(regime_df)
+    risk_df = _norm_dates(risk_df)
+
+    if drift_df.empty:
+        st.warning("Monitoring signals are not available yet.")
         return
 
-    def _filter_by_date(df: pd.DataFrame | None, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame | None:
-        if df is None or df.empty or "Date" not in df.columns:
-            return df
-        out = df.copy()
-        out["Date"] = pd.to_datetime(out["Date"], errors="coerce", utc=True).dt.tz_localize(None)
-        out = out.dropna(subset=["Date"])
-        return out[(out["Date"] >= start) & (out["Date"] <= end)].copy()
+    latest_date = pd.Timestamp.utcnow().normalize()
+    if "Date" in drift_df.columns and not drift_df["Date"].dropna().empty:
+        latest_date = pd.Timestamp(drift_df["Date"].max()).normalize()
+    win_90_start = latest_date - pd.Timedelta(days=90)
+    win_60_start = latest_date - pd.Timedelta(days=60)
 
-    date_chunks: list[pd.Series] = []
-    for src in [drift_hist_df, drift_df, alert_df, regime_df, risk_df]:
-        if src is None or src.empty or "Date" not in src.columns:
-            continue
-        s = pd.to_datetime(src["Date"], errors="coerce", utc=True).dt.tz_localize(None).dropna()
-        if not s.empty:
-            date_chunks.append(s)
+    drift_90 = drift_df[(drift_df["Date"] >= win_90_start) & (drift_df["Date"] <= latest_date)] if "Date" in drift_df.columns else drift_df.copy()
+    alerts_90 = alert_df[(alert_df["Date"] >= win_90_start) & (alert_df["Date"] <= latest_date)] if not alert_df.empty and "Date" in alert_df.columns else alert_df.copy()
+    regime_60 = regime_df[(regime_df["Date"] >= win_60_start) & (regime_df["Date"] <= latest_date)] if not regime_df.empty and "Date" in regime_df.columns else regime_df.copy()
+    risk_60 = risk_df[(risk_df["Date"] >= win_60_start) & (risk_df["Date"] <= latest_date)] if not risk_df.empty and "Date" in risk_df.columns else risk_df.copy()
 
-    if date_chunks:
-        all_dates = pd.concat(date_chunks, axis=0)
-        min_date = pd.Timestamp(all_dates.min()).normalize()
-        max_date = pd.Timestamp(all_dates.max()).normalize()
+    worst_level = "Stable"
+    if not drift_90.empty and "DriftLevel" in drift_90.columns:
+        levels = drift_90["DriftLevel"].astype(str)
+        if (levels == "Severe").any():
+            worst_level = "Severe"
+        elif (levels == "Drift").any():
+            worst_level = "Drift"
+
+    critical_count = int((alerts_90["Severity"].astype(str) == "Critical").sum()) if not alerts_90.empty and "Severity" in alerts_90.columns else 0
+    warning_count = int((alerts_90["Severity"].astype(str) == "Warning").sum()) if not alerts_90.empty and "Severity" in alerts_90.columns else 0
+    info_count = int((alerts_90["Severity"].astype(str) == "Info").sum()) if not alerts_90.empty and "Severity" in alerts_90.columns else 0
+
+    if worst_level == "Severe":
+        banner_title = "Model inputs are changing significantly"
+        banner_copy = (
+            "The data the model relies on has drifted enough to trigger a Severe alert. "
+            "Signals are currently unstable. Scores and ratings are still generated, but treat them with extra caution right now."
+        )
+        banner_bg = "#f3e3df"
+        banner_border = "#d7866f"
+        banner_txt = "#5d2c1f"
+    elif worst_level == "Drift":
+        banner_title = "Some model inputs are shifting"
+        banner_copy = (
+            "Recent market data has moved away from normal ranges. "
+            "Signals remain useful, but confidence is lower than usual."
+        )
+        banner_bg = "#f6eddc"
+        banner_border = "#d8a54d"
+        banner_txt = "#5c3f12"
     else:
-        max_date = pd.Timestamp.utcnow().normalize()
-        min_date = max_date - pd.Timedelta(days=365)
+        banner_title = "Model conditions look stable"
+        banner_copy = "No material drift warning is active. Signals appear broadly stable."
+        banner_bg = "#e1f0e7"
+        banner_border = "#71b18d"
+        banner_txt = "#18422c"
 
-    mon_range = st.selectbox(
-        "Date range",
-        ["Last 30D", "Last 60D", "Last 90D", "Last 180D", "All"],
-        index=2,
-        key="mon_date_range_preset",
+    st.markdown(
+        f"""
+        <div style="border:1px solid {banner_border}; background:{banner_bg}; color:{banner_txt}; border-radius:14px; padding:16px 18px; margin:8px 0 14px 0;">
+          <div style="font-size:1.9rem; font-weight:800; line-height:1.2;">{html.escape(banner_title)}</div>
+          <div style="margin-top:6px; font-size:1.03rem; line-height:1.5;">{html.escape(banner_copy)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    if mon_range == "All":
-        win_start = min_date
-        win_end = max_date
-    else:
-        days = int(mon_range.split()[1].replace("D", ""))
-        win_start = max(min_date, max_date - pd.Timedelta(days=days))
-        win_end = max_date
-    if win_start > win_end:
-        win_start, win_end = win_end, win_start
-    win_end = win_end + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
 
-    drift_df_f = _filter_by_date(drift_df, win_start, win_end)
-    drift_hist_df_f = _filter_by_date(drift_hist_df, win_start, win_end)
-    alert_df_f = _filter_by_date(alert_df, win_start, win_end)
-    regime_df_f = _filter_by_date(regime_df, win_start, win_end)
-    risk_df_f = _filter_by_date(risk_df, win_start, win_end)
-
-    # Section A: summary
-    st.markdown("### A. Monitoring Summary")
-    worst = "Stable"
-    src_summary = drift_df_f if (drift_df_f is not None and not drift_df_f.empty) else drift_df
-    if (src_summary["DriftLevel"] == "Severe").any():
-        worst = "Severe"
-    elif (src_summary["DriftLevel"] == "Drift").any():
-        worst = "Drift"
-    signal_unstable = "Unstable" if ((src_summary["MetricType"] == "Signal") & (src_summary["DriftLevel"] != "Stable")).any() else "Stable"
-    src_alerts = alert_df_f if (alert_df_f is not None and not alert_df_f.empty) else alert_df
-    crit = int(((src_alerts is not None) and (not src_alerts.empty) and (src_alerts["Severity"] == "Critical").sum()) or 0)
-    warn = int(((src_alerts is not None) and (not src_alerts.empty) and (src_alerts["Severity"] == "Warning").sum()) or 0)
-    info = int(((src_alerts is not None) and (not src_alerts.empty) and (src_alerts["Severity"] == "Info").sum()) or 0)
-
+    st.markdown("### Active Alerts - Last 90 Days")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric("Feature Drift", worst)
+        st.metric("Critical", critical_count)
     with c2:
-        st.metric("Signal Stability", signal_unstable)
+        st.metric("Warnings", warning_count)
     with c3:
-        st.metric("Active Alerts", f"C:{crit} W:{warn} I:{info}")
+        st.metric("Info only", info_count)
 
-    # Section B: alerts
-    st.markdown("### B. Active Alerts")
-    if src_alerts is None or src_alerts.empty:
-        st.caption("No alerts available.")
+    flip_rate = float("nan")
+    avg_conf = float("nan")
+    if not regime_60.empty and "RegimeLabel" in regime_60.columns:
+        r60 = regime_60.sort_values("Date").copy()
+        flip_rate = float((r60["RegimeLabel"].astype(str) != r60["RegimeLabel"].astype(str).shift(1)).mean()) if len(r60) > 1 else 0.0
+        if "ConfidenceScore" in r60.columns:
+            avg_conf = float(pd.to_numeric(r60["ConfidenceScore"], errors="coerce").mean())
+
+    risk_changes = 0
+    risk_vol = float("nan")
+    if not risk_60.empty:
+        rk60 = risk_60.sort_values("Date").copy()
+        if "RiskLevel" in rk60.columns:
+            risk_changes = int((rk60["RiskLevel"].astype(str) != rk60["RiskLevel"].astype(str).shift(1)).sum())
+        if "RiskScore" in rk60.columns:
+            rk60["RiskScore"] = pd.to_numeric(rk60["RiskScore"], errors="coerce")
+            risk_vol = float(rk60["RiskScore"].std(ddof=1)) if rk60["RiskScore"].notna().sum() > 1 else 0.0
+
+    metric_name_map = {
+        "BenchmarkVolatility_63d": "Market volatility inputs have drifted",
+        "RegimeFlipRate_60d": "Market direction has been flipping frequently",
+        "RiskScoreVol_60d": "Risk score has been volatile",
+        "QualityProxyDrift": "Stock-level quality scores are shifting",
+    }
+    drift_rows = drift_90.copy()
+    if not drift_rows.empty and "DriftScore" in drift_rows.columns:
+        drift_rows["DriftScore"] = pd.to_numeric(drift_rows["DriftScore"], errors="coerce")
+        drift_rows = drift_rows.sort_values("DriftScore", ascending=False)
+
+    flagged: list[dict[str, str]] = []
+
+    def _sev_label(level: str) -> str:
+        x = str(level).lower()
+        if x in {"critical", "severe"}:
+            return "Critical"
+        if x in {"warning", "drift"}:
+            return "Warning"
+        return "Info"
+
+    if np.isfinite(flip_rate) and flip_rate >= 0.10:
+        sev = "Critical" if flip_rate >= 0.15 else "Warning"
+        flagged.append(
+            {
+                "title": "Market direction has been flipping frequently",
+                "sev": sev,
+                "body": f"The market mood has changed direction about {flip_rate*100:.0f}% of the time over the last 60 days, higher than normal.",
+                "action": "Do not act on single-day regime shifts; wait for multi-day consistency.",
+            }
+        )
+    if np.isfinite(avg_conf) and avg_conf <= 0.60:
+        flagged.append(
+            {
+                "title": "Signals are oscillating without a clear trend",
+                "sev": "Warning",
+                "body": f"Average confidence has been about {avg_conf*100:.0f}% over the last 60 days, barely above a coin flip.",
+                "action": "Weight fundamentals and valuation more heavily until confidence improves.",
+            }
+        )
+    if risk_changes >= 8:
+        sev = "Critical" if risk_changes >= 12 else "Warning"
+        flagged.append(
+            {
+                "title": "Risk score has been volatile",
+                "sev": sev,
+                "body": f"The risk level changed {risk_changes} times in the last 60 days, so the current reading may not stay stable for long.",
+                "action": "Check back frequently; avoid treating risk level as static.",
+            }
+        )
+    if np.isfinite(risk_vol) and risk_vol >= 6:
+        sev = "Critical" if risk_vol >= 12 else "Warning"
+        flagged.append(
+            {
+                "title": "Market risk conditions are moving quickly",
+                "sev": sev,
+                "body": "Day-to-day risk readings have become more volatile than normal.",
+                "action": "Use smaller position changes and stagger entries/exits.",
+            }
+        )
+
+    for _, row in drift_rows.head(5).iterrows():
+        lvl = str(row.get("DriftLevel", ""))
+        if lvl not in {"Severe", "Drift"}:
+            continue
+        metric = str(row.get("MetricName", "Model input"))
+        title = metric_name_map.get(metric, "Model inputs are changing")
+        if any(x["title"] == title for x in flagged):
+            continue
+        flagged.append(
+            {
+                "title": title,
+                "sev": _sev_label(lvl),
+                "body": "The data feeding this part of the model looks different from normal conditions, which can reduce score reliability.",
+                "action": "Cross-check with your own view of market conditions before making large moves.",
+            }
+        )
+
+    st.markdown("### What's Being Flagged")
+    if not flagged:
+        st.caption("No high-priority instability flags right now.")
     else:
-        a = src_alerts.copy()
-        a["Date"] = pd.to_datetime(a["Date"], errors="coerce", utc=True).dt.tz_localize(None)
-        recent = a.sort_values("Date", ascending=False).head(50)
-        cols = [c for c in ["Severity", "AlertType", "Title", "Date"] if c in recent.columns]
-        _render_sortable_all_but_first_table(recent[cols])
-
-        choices = [f"{r.Severity} | {r.AlertType} | {r.Date:%Y-%m-%d}" for r in recent.itertuples()]
-        idx = st.selectbox("Select alert", options=list(range(len(choices))), format_func=lambda i: choices[i], key="mon_alert_pick")
-        row = recent.iloc[int(idx)]
-        st.caption(str(row.get("Description", "")))
-        try:
-            ev = json.loads(str(row.get("EvidenceJSON", "{}")))
-            if isinstance(ev, dict) and ev:
-                ev_df = pd.json_normalize(ev, sep=".")
-                _render_sortable_all_but_first_table(ev_df)
-            elif isinstance(ev, list) and ev:
-                _render_sortable_all_but_first_table(pd.json_normalize(ev, sep="."))
+        for item in flagged[:6]:
+            sev = item["sev"]
+            if sev == "Critical":
+                dot = "#ef5a5a"
+                pill_bg = "#f3e1dd"
+                pill_fg = "#8c2f2f"
+            elif sev == "Warning":
+                dot = "#d99a2f"
+                pill_bg = "#f8efd9"
+                pill_fg = "#80550e"
             else:
-                st.caption("No structured evidence details available.")
-        except Exception:
-            st.caption("Evidence JSON unavailable.")
-        st.caption(f"Suggested action: {row.get('SuggestedAction', 'N/A')}")
+                dot = "#6aa4df"
+                pill_bg = "#e4eef9"
+                pill_fg = "#1f4b7d"
+            st.markdown(
+                f"""
+                <div style="border:1px solid rgba(135,162,196,0.24); border-radius:12px; padding:12px 14px; margin:8px 0; background:rgba(10,22,41,0.45);">
+                  <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="width:11px; height:11px; border-radius:999px; background:{dot}; display:inline-block;"></span>
+                    <span style="font-size:1.35rem; font-weight:800; color:#edf4ff;">{html.escape(item['title'])}</span>
+                    <span style="margin-left:auto; padding:2px 10px; border-radius:999px; background:{pill_bg}; color:{pill_fg}; font-weight:700; font-size:0.92rem;">{sev}</span>
+                  </div>
+                  <div style="margin-top:6px; color:#d1def4; line-height:1.45;">{html.escape(item['body'])}</div>
+                  <div style="margin-top:5px; color:#b8cae8; font-style:italic;">-> {html.escape(item['action'])}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-    # Section C: drift dashboard
-    st.markdown("### C. Drift Dashboard")
-    levels = ["All", "Stable", "Drift", "Severe"]
-    types = ["All", "Feature", "Signal"]
+    st.markdown("### How Stable Are Signals Right Now?")
+    m_status = "Stable"
+    m_text = "Direction changes are within normal range."
+    m_color = "#63c38f"
+    if np.isfinite(flip_rate):
+        if flip_rate >= 0.15:
+            m_status = "Unstable"
+            m_color = "#ef5a5a"
+        elif flip_rate >= 0.10:
+            m_status = "Moderate"
+            m_color = "#d99a2f"
+        m_text = f"Flipping direction ~{flip_rate*100:.0f}% of the time - {'higher than normal' if flip_rate >= 0.10 else 'within normal range'}."
+
+    r_status = "Stable"
+    r_text = "Risk level has been relatively steady."
+    r_color = "#63c38f"
+    if risk_changes >= 10:
+        r_status = "Moderate"
+        r_color = "#d99a2f"
+        r_text = f"Changed {risk_changes} times in 60 days."
+    if risk_changes >= 14:
+        r_status = "Unstable"
+        r_color = "#ef5a5a"
+        r_text = f"Changed {risk_changes} times in 60 days - very unstable."
+
     c1, c2 = st.columns(2)
     with c1:
-        level_pick = st.selectbox("DriftLevel filter", options=levels, index=0, key="mon_level_filter")
+        st.markdown(
+            f"""
+            <div style="border:1px solid rgba(135,162,196,0.24); border-radius:12px; padding:12px 14px; background:rgba(10,22,41,0.45);">
+              <div class="diw-muted">Market mood stability</div>
+              <div style="font-size:1.9rem; font-weight:800; color:{m_color}; margin-top:2px;">{m_status}</div>
+              <div style="height:7px; border-radius:999px; background:rgba(132,154,184,0.25); margin:8px 0 9px 0;">
+                <div style="height:7px; border-radius:999px; background:{m_color}; width:{min(95, max(12, (flip_rate*100 if np.isfinite(flip_rate) else 8)))}%;"></div>
+              </div>
+              <div class="diw-muted">{html.escape(m_text)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     with c2:
-        type_pick = st.selectbox("MetricType filter", options=types, index=0, key="mon_type_filter")
-    d = src_summary.copy()
-    if level_pick != "All":
-        d = d[d["DriftLevel"] == level_pick]
-    if type_pick != "All":
-        d = d[d["MetricType"] == type_pick]
-    d = d.sort_values("DriftScore", ascending=False)
-    _render_sortable_all_but_first_table(d)
+        bar_w = min(95, max(12, risk_changes * 6 if risk_changes > 0 else 10))
+        st.markdown(
+            f"""
+            <div style="border:1px solid rgba(135,162,196,0.24); border-radius:12px; padding:12px 14px; background:rgba(10,22,41,0.45);">
+              <div class="diw-muted">Risk level stability</div>
+              <div style="font-size:1.9rem; font-weight:800; color:{r_color}; margin-top:2px;">{r_status}</div>
+              <div style="height:7px; border-radius:999px; background:rgba(132,154,184,0.25); margin:8px 0 9px 0;">
+                <div style="height:7px; border-radius:999px; background:{r_color}; width:{bar_w}%;"></div>
+              </div>
+              <div class="diw-muted">{html.escape(r_text)}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    trend_src = drift_hist_df_f if (drift_hist_df_f is not None and not drift_hist_df_f.empty) else src_summary
-    if trend_src is not None and not trend_src.empty:
-        metric_names = sorted(trend_src["MetricName"].astype(str).unique().tolist())
-        sel_metric = st.selectbox("Drift metric trend", options=metric_names, index=0, key="mon_metric_trend")
-        trend = trend_src[trend_src["MetricName"] == sel_metric].copy()
-        if not trend.empty:
-            trend["Date"] = pd.to_datetime(trend["Date"], errors="coerce")
-            trend["DriftScore"] = pd.to_numeric(trend["DriftScore"], errors="coerce")
-            trend = trend.dropna(subset=["Date", "DriftScore"]).sort_values("Date")
-            if not trend.empty:
-                trend_chart = (
-                    alt.Chart(trend)
-                    .mark_line(color="#7ec8ff")
-                    .encode(
-                        x=alt.X("Date:T", scale=alt.Scale(domain=[win_start, win_end]), title=""),
-                        y=alt.Y("DriftScore:Q", title=""),
-                    )
-                    .properties(height=300)
-                    .interactive()
+    st.markdown("### Drift Trend - Last 90 Days")
+    trend_src = drift_hist_df if not drift_hist_df.empty else drift_df
+    if not trend_src.empty and {"Date", "DriftScore"}.issubset(set(trend_src.columns)):
+        t = trend_src.copy()
+        t["DriftScore"] = pd.to_numeric(t["DriftScore"], errors="coerce")
+        t = t.dropna(subset=["Date", "DriftScore"])
+        t = t[(t["Date"] >= win_90_start) & (t["Date"] <= latest_date)]
+        if not t.empty:
+            t["AsOfDate"] = t["Date"].dt.normalize()
+            td = t.groupby("AsOfDate", as_index=False)["DriftScore"].max()
+            td = td.sort_values("AsOfDate")
+            threshold = 0.25
+            line = (
+                alt.Chart(td)
+                .mark_line(color="#ef5a5a", strokeWidth=3)
+                .encode(
+                    x=alt.X("AsOfDate:T", title=None, axis=alt.Axis(format="%b %Y", labelColor="#b9cee8", tickCount=3)),
+                    y=alt.Y("DriftScore:Q", title=None, axis=alt.Axis(labels=False, ticks=False, domain=False)),
+                    tooltip=[alt.Tooltip("AsOfDate:T", title="Date"), alt.Tooltip("DriftScore:Q", title="Drift", format=".3f")],
                 )
-                st.altair_chart(trend_chart, use_container_width=True)
+            )
+            rule = alt.Chart(pd.DataFrame({"y": [threshold]})).mark_rule(strokeDash=[6, 4], color="#d99a2f").encode(y="y:Q")
+            st.altair_chart((line + rule).properties(height=210), use_container_width=True)
+            st.caption("Higher values mean inputs are shifting further from normal ranges, so scores are less reliable.")
+    else:
+        st.caption("Drift trend unavailable.")
 
-    # Section D: signal stability
-    st.markdown("### D. Signal Stability")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if regime_df_f is not None and not regime_df_f.empty and "RegimeLabel" in regime_df_f.columns:
-            rr = regime_df_f.copy()
-            rr["Date"] = pd.to_datetime(rr["Date"], errors="coerce")
-            rr = rr.dropna(subset=["Date"]).sort_values("Date").tail(60)
-            flip = float((rr["RegimeLabel"] != rr["RegimeLabel"].shift(1)).mean()) if len(rr) > 1 else 0.0
-            avg_conf = float(pd.to_numeric(rr.get("ConfidenceScore"), errors="coerce").mean()) if "ConfidenceScore" in rr.columns else float("nan")
-            st.metric("Regime Flip Rate (60d)", f"{flip:.2f}")
-            if pd.notna(avg_conf):
-                st.caption(f"Avg confidence (60d): {avg_conf:.2f}")
-    with c2:
-        if risk_df_f is not None and not risk_df_f.empty and "RiskScore" in risk_df_f.columns:
-            rk = risk_df_f.copy()
-            rk["Date"] = pd.to_datetime(rk["Date"], errors="coerce")
-            rk["RiskScore"] = pd.to_numeric(rk["RiskScore"], errors="coerce")
-            rk = rk.dropna(subset=["Date", "RiskScore"]).sort_values("Date").tail(60)
-            vol = float(rk["RiskScore"].std(ddof=1)) if len(rk) > 1 else 0.0
-            chg = int((rk["RiskLevel"] != rk["RiskLevel"].shift(1)).sum()) if "RiskLevel" in rk.columns else 0
-            st.metric("RiskScore Volatility (60d)", f"{vol:.2f}")
-            st.caption(f"Risk level changes (60d): {chg}")
-    with c3:
-        q_proxy = src_summary[src_summary["MetricName"] == "QualityProxyDrift"]
-        if not q_proxy.empty:
-            val = float(q_proxy["DriftScore"].iloc[-1])
-            st.metric("Quality Instability Proxy", f"{val:.3f}")
-
-    # Optional monitoring reports
-    st.markdown("#### Monitoring Reports")
+    missing_fcf = None
     try:
-        with open(DRIFT_REPORT_PATH, "r", encoding="utf-8") as f:
-            dr = json.load(f)
-        st.markdown("**Drift Report**")
-        if isinstance(dr, dict) and dr:
-            created_at = dr.get("created_at") or dr.get("generated_at")
-            if created_at:
-                st.caption(f"Generated at: {created_at}")
-
-            top_features = dr.get("top_drifting_features", [])
-            top_signals = dr.get("top_drifting_signals", [])
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.metric("Top Feature Drivers", len(top_features) if isinstance(top_features, list) else 0)
-            with c2:
-                st.metric("Top Signal Drivers", len(top_signals) if isinstance(top_signals, list) else 0)
-            with c3:
-                worst_level = "Unknown"
-                if isinstance(top_features, list) and top_features:
-                    levels = pd.Series([str(x.get("DriftLevel", "")) for x in top_features]).str.lower()
-                    if (levels == "severe").any():
-                        worst_level = "Severe"
-                    elif (levels == "drift").any():
-                        worst_level = "Drift"
-                    elif (levels == "stable").any():
-                        worst_level = "Stable"
-                st.metric("Worst Feature Drift", worst_level)
-
-            window_settings = dr.get("window_settings_used", {})
-            if isinstance(window_settings, dict) and window_settings:
-                st.markdown("Window Settings")
-                _render_sortable_all_but_first_table(pd.DataFrame([window_settings]))
-
-            if isinstance(top_features, list) and top_features:
-                st.markdown("Top Drifting Features")
-                tf_df = _filter_by_date(pd.DataFrame(top_features), win_start, win_end)
-                _render_sortable_all_but_first_table(tf_df if tf_df is not None else pd.DataFrame(top_features))
-            if isinstance(top_signals, list) and top_signals:
-                st.markdown("Top Drifting Signals")
-                ts_df = _filter_by_date(pd.DataFrame(top_signals), win_start, win_end)
-                _render_sortable_all_but_first_table(ts_df if ts_df is not None else pd.DataFrame(top_signals))
-
-            coverage = dr.get("data_coverage_stats", {})
-            if isinstance(coverage, dict) and coverage:
-                st.markdown("Coverage Summary")
-                cov_simple = {
-                    k: v for k, v in coverage.items() if k != "missing_counts"
-                }
-                if cov_simple:
-                    _render_sortable_first_col_centered_table(pd.DataFrame([cov_simple]))
-                missing_counts = coverage.get("missing_counts", {})
-                if isinstance(missing_counts, dict) and missing_counts:
-                    miss_df = pd.DataFrame(
-                        [{"MetricName": k, "MissingCount": int(v)} for k, v in missing_counts.items()]
-                    ).sort_values("MissingCount", ascending=False)
-                    st.markdown("Missing Feature Counts")
-                    _render_sortable_all_but_first_table(miss_df)
-
-            notes = dr.get("warnings_and_fallbacks_used", [])
-            if isinstance(notes, list) and notes:
-                st.markdown("Warnings and Fallbacks")
-                for n in notes:
-                    st.caption(f"- {n}")
-
-            summary = dr.get("short_narrative_summary")
-            if summary:
-                st.caption(str(summary))
-        elif isinstance(dr, list) and dr:
-            dr_df = _filter_by_date(pd.json_normalize(dr, sep="."), win_start, win_end)
-            _render_sortable_all_but_first_table(dr_df if dr_df is not None else pd.json_normalize(dr, sep="."))
-        else:
-            st.caption("Drift report is empty.")
-    except Exception:
-        st.caption("drift_report.json not available.")
-    try:
-        with open(MONITORING_HEALTH_PATH, "r", encoding="utf-8") as f:
+        with open(MODEL_HEALTH_PATH, "r", encoding="utf-8") as f:
             mh = json.load(f)
-        st.markdown("**Monitoring Health Report**")
-        if isinstance(mh, dict) and mh:
-            created_at = mh.get("created_at") or mh.get("generated_at")
-            if created_at:
-                st.caption(f"Generated at: {created_at}")
-
-            freshness = mh.get("artifact_freshness", {})
-            status_l = pd.Series(dtype=str)
-            if isinstance(freshness, dict) and freshness:
-                status_l = pd.Series([str(v) for v in freshness.values()]).str.lower()
-
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.metric("Alerts Generated", int(mh.get("alerts_generated_count") or 0))
-            with c2:
-                st.metric("Worst Drift Level", str(mh.get("worst_drift_level", "Unknown")))
-            with c3:
-                st.metric("Fresh Artifacts", int((status_l == "fresh").sum()) if not status_l.empty else 0)
-
-            if isinstance(freshness, dict) and freshness:
-                fresh_df = pd.DataFrame(
-                    [{"artifact": k, "status": str(v)} for k, v in freshness.items()]
-                )
-                st.markdown("Artifact Freshness")
-                _render_sortable_all_but_first_table(fresh_df)
-
-            coverage = mh.get("coverage", {})
-            if isinstance(coverage, dict) and coverage:
-                st.markdown("Coverage Summary")
-                cov_simple = {
-                    k: v for k, v in coverage.items() if k != "missing_counts"
-                }
-                if cov_simple:
-                    _render_sortable_first_col_centered_table(pd.DataFrame([cov_simple]))
-                missing_counts = coverage.get("missing_counts", {})
-                if isinstance(missing_counts, dict) and missing_counts:
-                    miss_df = pd.DataFrame(
-                        [{"MetricName": k, "MissingCount": int(v)} for k, v in missing_counts.items()]
-                    ).sort_values("MissingCount", ascending=False)
-                    st.markdown("Coverage Missing Counts")
-                    _render_sortable_all_but_first_table(miss_df)
-
-            mfc = mh.get("missing_feature_counts", {})
-            if isinstance(mfc, dict) and mfc:
-                mfc_df = pd.DataFrame(
-                    [{"MetricName": k, "MissingCount": int(v)} for k, v in mfc.items()]
-                ).sort_values("MissingCount", ascending=False)
-                st.markdown("Missing Feature Counts")
-                _render_sortable_all_but_first_table(mfc_df)
-
-            notes = mh.get("runtime_notes", [])
-            if isinstance(notes, list) and notes:
-                st.markdown("Runtime Notes")
-                for n in notes:
-                    st.caption(f"- {n}")
-        elif isinstance(mh, list) and mh:
-            mh_df = _filter_by_date(pd.json_normalize(mh, sep="."), win_start, win_end)
-            _render_sortable_all_but_first_table(mh_df if mh_df is not None else pd.json_normalize(mh, sep="."))
-        else:
-            st.caption("Monitoring health report is empty.")
+        missing_fcf = (
+            mh.get("feature_availability_indicators", {})
+            .get("missing_counts", {})
+            .get("FreeCashFlow_Margin")
+        )
     except Exception:
-        st.caption("monitoring_health_report.json not available.")
+        missing_fcf = None
+
+    if isinstance(missing_fcf, (int, float)) and missing_fcf > 0:
+        st.markdown("### Data Quality Note")
+        st.markdown(
+            "⚠️ **Some data is missing.** Free cash flow data is currently unavailable for part of the universe. "
+            "Scores that rely on this metric may be slightly less precise, but this does not invalidate the full signal."
+        )
 
 
 _show_signal_banner()
 
-stock_tab, fi_tab, sim_tab, di_tab, ex_tab, un_tab, mon_tab, dx_tab = st.tabs(
+stock_tab, fi_tab, mi_tab = st.tabs(
     [
         "Stock Screener",
         "Bond & Treasury Screener",
-        "Portfolio Decision Simulator",
         "Decision Intelligence",
-        "Explainability and Evidence",
-        "Uncertainty and Confidence",
-        "Drift, Monitoring, and Early Warning",
-        "Diagnostics",
     ]
 )
 with stock_tab:
     _show_stock_tab()
 with fi_tab:
     _show_fixed_income_tab()
-with sim_tab:
-    _show_portfolio_simulator_tab()
-with di_tab:
-    _show_decision_intelligence_tab()
-with ex_tab:
-    _show_explainability_tab()
-with un_tab:
-    _show_uncertainty_tab()
-with mon_tab:
-    _show_monitoring_tab()
-with dx_tab:
-    _show_diagnostics_tab()
+with mi_tab:
+    _show_market_intelligence_tab()
+
+
 
