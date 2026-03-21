@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from io import StringIO
 from pathlib import Path
@@ -54,6 +55,17 @@ TREASURY_SERIES = {
     "DGS3MO": "3M",
 }
 
+SAVED_PORTFOLIO_ARTIFACTS = (
+    (
+        "data/portfolio_suggestions_saved.jsonl",
+        "data/portfolio_suggestions_health_report.json",
+    ),
+    (
+        "data/portfolio_optimized_saved.jsonl",
+        "data/portfolio_optimized_health_report.json",
+    ),
+)
+
 
 def _print_result(label: str, result) -> None:
     row_count = int(len(result.data)) if getattr(result, "data", None) is not None else 0
@@ -88,6 +100,73 @@ def _stage_start(name: str) -> float:
 def _stage_end(name: str, started_at: float) -> None:
     elapsed = time.perf_counter() - started_at
     print(f"[DONE] {name} ({elapsed:.1f}s)", flush=True)
+
+
+def _update_saved_portfolio_artifact_health(
+    *,
+    artifact_path: str,
+    health_path: str,
+    max_entries: int,
+    stale_after_days: int = 7,
+) -> None:
+    artifact_file = Path(artifact_path)
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    payloads: list[dict] = []
+    parse_errors = 0
+
+    if artifact_file.exists():
+        raw_lines = [line.strip() for line in artifact_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+        for line in raw_lines:
+            try:
+                row = json.loads(line)
+                if isinstance(row, dict):
+                    payloads.append(row)
+                else:
+                    parse_errors += 1
+            except Exception:
+                parse_errors += 1
+
+        if max_entries > 0 and len(payloads) > max_entries:
+            payloads = payloads[-max_entries:]
+            artifact_file.write_text("".join(json.dumps(p) + "\n" for p in payloads), encoding="utf-8")
+
+    saved_times: list[pd.Timestamp] = []
+    for row in payloads:
+        raw = row.get("saved_at_utc")
+        ts = pd.to_datetime(raw, errors="coerce", utc=True)
+        if pd.notna(ts):
+            saved_times.append(pd.Timestamp(ts).tz_convert(None))
+
+    latest_saved_at = max(saved_times).isoformat() if saved_times else None
+    cutoff = now - pd.Timedelta(days=max(stale_after_days, 1))
+    fresh_count = int(sum(1 for ts in saved_times if ts >= cutoff))
+    stale_count = int(max(len(payloads) - fresh_count, 0))
+
+    write_json_report(
+        {
+            "run_timestamp": pd.Timestamp.utcnow().isoformat(),
+            "artifact_path": artifact_path,
+            "exists": artifact_file.exists(),
+            "entry_count": int(len(payloads)),
+            "latest_saved_at_utc": latest_saved_at,
+            "fresh_count": fresh_count,
+            "stale_count": stale_count,
+            "parse_error_count": int(parse_errors),
+            "file_size_bytes": int(artifact_file.stat().st_size) if artifact_file.exists() else 0,
+            "retention_max_entries": int(max_entries),
+        },
+        health_path,
+    )
+
+
+def refresh_saved_portfolio_artifacts(*, max_entries: int = 500) -> None:
+    for artifact_path, health_path in SAVED_PORTFOLIO_ARTIFACTS:
+        _update_saved_portfolio_artifact_health(
+            artifact_path=artifact_path,
+            health_path=health_path,
+            max_entries=max_entries,
+        )
+        print(f"portfolio_artifact: path={artifact_path} max_entries={max_entries}", flush=True)
 
 
 def refresh_treasury_yields(*, lookback_years: int = 10) -> pd.DataFrame:
@@ -245,6 +324,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-explainability", action="store_true", help="Skip rebuilding explainability artifacts.")
     parser.add_argument("--skip-uncertainty", action="store_true", help="Skip rebuilding uncertainty artifacts.")
     parser.add_argument("--skip-monitoring", action="store_true", help="Skip rebuilding monitoring artifacts.")
+    parser.add_argument("--skip-portfolio-artifacts", action="store_true", help="Skip updating saved portfolio artifact health/retention.")
+    parser.add_argument("--portfolio-max-entries", type=int, default=500, help="Maximum saved rows to retain in each saved portfolio JSONL artifact.")
     return parser
 
 
@@ -318,6 +399,11 @@ def main() -> int:
         monitoring_result = run_monitoring_pipeline(benchmark_ticker=str(args.benchmark).strip().upper())
         _print_result("monitoring", monitoring_result)
         _stage_end("monitoring artifacts", started_at)
+
+    if not args.skip_portfolio_artifacts:
+        started_at = _stage_start("portfolio artifacts")
+        refresh_saved_portfolio_artifacts(max_entries=max(int(args.portfolio_max_entries), 1))
+        _stage_end("portfolio artifacts", started_at)
 
     print("scheduled refresh complete", flush=True)
     return 0
