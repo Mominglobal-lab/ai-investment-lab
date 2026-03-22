@@ -86,7 +86,8 @@ def run_regime_detection_model(
     px["AdjClose"] = pd.to_numeric(px["AdjClose"], errors="coerce")
     px = px.dropna(subset=["Ticker", "Date", "AdjClose"])
 
-    b = px[px["Ticker"] == str(benchmark_ticker).upper()].sort_values("Date")
+    benchmark_symbol = str(benchmark_ticker or "").strip().upper()
+    b = px[px["Ticker"] == benchmark_symbol].sort_values("Date")
     if b.empty:
         raise ValueError(f"Benchmark ticker {benchmark_ticker} not found in prices cache")
 

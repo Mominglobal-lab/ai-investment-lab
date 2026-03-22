@@ -62,10 +62,11 @@ def run_systemic_risk_detector(
     px["AdjClose"] = pd.to_numeric(px["AdjClose"], errors="coerce")
     px = px.dropna(subset=["Ticker", "Date", "AdjClose"]).sort_values(["Ticker", "Date"])
 
+    benchmark_symbol = str(benchmark_ticker or "").strip().upper()
     pivot = px.pivot_table(index="Date", columns="Ticker", values="AdjClose", aggfunc="last").sort_index()
-    if benchmark_ticker.upper() not in pivot.columns:
+    if benchmark_symbol not in pivot.columns:
         raise ValueError(f"Benchmark ticker {benchmark_ticker} not found in prices cache")
-    b = pivot[benchmark_ticker.upper()].dropna()
+    b = pivot[benchmark_symbol].dropna()
     r = b.pct_change().dropna()
     dates = r.index
 
