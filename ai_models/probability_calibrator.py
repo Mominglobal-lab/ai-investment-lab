@@ -12,6 +12,20 @@ def _same_as_previous(series: pd.Series) -> pd.Series:
     return same
 
 
+def _normalize_regime_label(value: object) -> str:
+    txt = str(value).strip() if pd.notna(value) else ""
+    low = txt.lower()
+    if low in {"", "nan", "none"}:
+        return "Neutral"
+    if low == "risk on":
+        return "Risk On"
+    if low == "risk off":
+        return "Risk Off"
+    if low == "neutral":
+        return "Neutral"
+    return txt
+
+
 def build_regime_probabilities(regime_df: pd.DataFrame, window: int = 20) -> pd.DataFrame:
     if regime_df is None or regime_df.empty:
         return pd.DataFrame(
@@ -29,10 +43,7 @@ def build_regime_probabilities(regime_df: pd.DataFrame, window: int = 20) -> pd.
     r = regime_df.copy()
     r["Date"] = pd.to_datetime(r["Date"], errors="coerce")
     r["ConfidenceScore"] = pd.to_numeric(r["ConfidenceScore"], errors="coerce").fillna(0.55)
-    r["RegimeLabel"] = r["RegimeLabel"].where(pd.notna(r["RegimeLabel"]), "Neutral")
-    r["RegimeLabel"] = r["RegimeLabel"].astype(str).str.strip()
-    invalid_labels = r["RegimeLabel"].str.lower().isin({"", "nan", "none"})
-    r.loc[invalid_labels, "RegimeLabel"] = "Neutral"
+    r["RegimeLabel"] = r["RegimeLabel"].map(_normalize_regime_label)
     r = r.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
 
     out_rows: list[dict[str, object]] = []

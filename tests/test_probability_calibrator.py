@@ -79,3 +79,20 @@ def test_mixed_case_placeholder_regime_labels_default_to_neutral():
 
     assert out["RegimeLabel"].tolist()[:2] == ["Neutral", "Neutral"]
 
+
+def test_case_variant_regime_labels_are_canonicalized():
+    dates = pd.date_range("2025-01-01", periods=3, freq="B")
+    df = pd.DataFrame(
+        {
+            "Date": dates,
+            "RegimeLabel": ["risk on", "RISK OFF", " neutral "],
+            "ConfidenceScore": [0.7, 0.8, 0.6],
+        }
+    )
+
+    out = build_regime_probabilities(df, window=2)
+
+    assert out["RegimeLabel"].tolist() == ["Risk On", "Risk Off", "Neutral"]
+    assert out["P_RiskOn"].iloc[0] > out["P_Neutral"].iloc[0]
+    assert out["P_RiskOff"].iloc[1] > out["P_Neutral"].iloc[1]
+

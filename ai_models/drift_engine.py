@@ -25,6 +25,16 @@ def _count_state_changes(series: pd.Series) -> int:
     return int(changed.sum())
 
 
+def _normalize_state_label(value: Any) -> str:
+    txt = str(value).strip() if pd.notna(value) else ""
+    low = txt.lower()
+    if low in {"risk on", "risk off", "neutral", "low", "moderate", "elevated"}:
+        return " ".join([part.capitalize() for part in low.split(" ")])
+    if low in {"", "nan", "none"}:
+        return ""
+    return txt
+
+
 def _state_flip_rate(series: pd.Series) -> float:
     if len(series) <= 1:
         return 0.0
@@ -123,6 +133,7 @@ def compute_signal_instability(
     if regime_df is not None and not regime_df.empty and {"Date", "RegimeLabel"}.issubset(set(regime_df.columns)):
         r = regime_df.copy()
         r["Date"] = pd.to_datetime(r["Date"], errors="coerce")
+        r["RegimeLabel"] = r["RegimeLabel"].map(_normalize_state_label)
         r = r.dropna(subset=["Date"]).sort_values("Date").tail(60)
         flip_rate = _state_flip_rate(r["RegimeLabel"]) if len(r) > 1 else 0.0
         avg_conf = float(pd.to_numeric(r.get("ConfidenceScore"), errors="coerce").mean()) if "ConfidenceScore" in r.columns else np.nan
@@ -146,6 +157,8 @@ def compute_signal_instability(
         k = risk_df.copy()
         k["Date"] = pd.to_datetime(k["Date"], errors="coerce")
         k["RiskScore"] = pd.to_numeric(k["RiskScore"], errors="coerce")
+        if "RiskLevel" in k.columns:
+            k["RiskLevel"] = k["RiskLevel"].map(_normalize_state_label)
         k = k.dropna(subset=["Date", "RiskScore"]).sort_values("Date").tail(60)
         score_vol = float(k["RiskScore"].std(ddof=1)) if len(k) > 1 else 0.0
         level_changes = 0
@@ -176,7 +189,17 @@ def compute_signal_instability(
             recent = df[df["Date"] >= (df["Date"].max() - pd.Timedelta(days=90))]
             old = df[(df["Date"] < recent["Date"].min()) & (df["Date"] >= (recent["Date"].min() - pd.Timedelta(days=252)))]
             # proxy on selected quality-related features
-            feat_cols = [c for c in ["RevenueGrowth", "EBITDAMargin", "ROE", "FCFMargin"] if c in df.columns]
+            quality_feature_aliases = [
+                ["Revenue_Growth_YoY_Pct", "RevenueGrowth"],
+                ["EBITDA_Margin", "EBITDAMargin"],
+                ["ROE"],
+                ["FreeCashFlow_Margin", "FCFMargin"],
+            ]
+            feat_cols: list[str] = []
+            for aliases in quality_feature_aliases:
+                chosen = next((c for c in aliases if c in df.columns), None)
+                if chosen is not None:
+                    feat_cols.append(chosen)
             psis: list[float] = []
             for c in feat_cols:
                 ps = _psi_from_arrays(pd.to_numeric(old[c], errors="coerce").values, pd.to_numeric(recent[c], errors="coerce").values)

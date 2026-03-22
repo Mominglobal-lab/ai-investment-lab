@@ -1,8 +1,29 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pandas as pd
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        out = float(value)
+    except Exception:
+        return float(default)
+    if not math.isfinite(out):
+        return float(default)
+    return out
+
+
+def _normalize_drift_level(value: Any) -> str:
+    txt = str(value).strip() if pd.notna(value) else ""
+    low = txt.lower()
+    if low == "severe":
+        return "Severe"
+    if low == "drift":
+        return "Drift"
+    return "Stable"
 
 
 def build_drift_report(
@@ -22,17 +43,17 @@ def build_drift_report(
         f = d[d["MetricType"] == "Feature"].sort_values("DriftScore", ascending=False).head(5)
         s = d[d["MetricType"] == "Signal"].sort_values("DriftScore", ascending=False).head(5)
         top_features = [
-            {"MetricName": str(r["MetricName"]), "DriftScore": float(r["DriftScore"]), "DriftLevel": str(r["DriftLevel"])}
+            {"MetricName": str(r["MetricName"]), "DriftScore": _safe_float(r["DriftScore"]), "DriftLevel": str(r["DriftLevel"])}
             for _, r in f.iterrows()
         ]
         top_signals = [
-            {"MetricName": str(r["MetricName"]), "DriftScore": float(r["DriftScore"]), "DriftLevel": str(r["DriftLevel"])}
+            {"MetricName": str(r["MetricName"]), "DriftScore": _safe_float(r["DriftScore"]), "DriftLevel": str(r["DriftLevel"])}
             for _, r in s.iterrows()
         ]
 
     worst = "Stable"
     if d is not None and not d.empty:
-        levels = d["DriftLevel"].astype(str).tolist()
+        levels = d["DriftLevel"].map(_normalize_drift_level).tolist()
         if "Severe" in levels:
             worst = "Severe"
         elif "Drift" in levels:
@@ -78,8 +99,8 @@ def build_monitoring_health_report(
         "alerts_generated_count": int(len(alerts_df) if alerts_df is not None else 0),
         "worst_drift_level": (
             "Severe"
-            if (drift_df is not None and not drift_df.empty and (drift_df["DriftLevel"] == "Severe").any())
-            else ("Drift" if (drift_df is not None and not drift_df.empty and (drift_df["DriftLevel"] == "Drift").any()) else "Stable")
+            if (drift_df is not None and not drift_df.empty and drift_df["DriftLevel"].map(_normalize_drift_level).eq("Severe").any())
+            else ("Drift" if (drift_df is not None and not drift_df.empty and drift_df["DriftLevel"].map(_normalize_drift_level).eq("Drift").any()) else "Stable")
         ),
     }
 

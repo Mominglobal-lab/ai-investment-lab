@@ -24,6 +24,16 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        out = float(value)
+    except Exception:
+        return float(default)
+    if not math.isfinite(out):
+        return float(default)
+    return out
+
+
 def _normalize_alert_date(value) -> pd.Timestamp:
     ts = pd.to_datetime(value, errors="coerce", utc=True)
     if pd.isna(ts):
@@ -63,6 +73,16 @@ def _count_state_changes(series: pd.Series) -> int:
     return int(changed.sum())
 
 
+def _normalize_state_label(value: Any) -> str:
+    txt = str(value).strip() if pd.notna(value) else ""
+    low = txt.lower()
+    if low in {"risk on", "risk off", "neutral", "low", "moderate", "elevated"}:
+        return " ".join([part.capitalize() for part in low.split(" ")])
+    if low in {"", "nan", "none"}:
+        return ""
+    return txt
+
+
 def generate_alerts(
     drift_df: pd.DataFrame,
     regime_df: pd.DataFrame | None,
@@ -74,7 +94,7 @@ def generate_alerts(
 
     if drift_df is not None and not drift_df.empty:
         for _, r in drift_df.iterrows():
-            score = float(r.get("DriftScore", 0.0))
+            score = _safe_float(r.get("DriftScore", 0.0))
             name = str(r.get("MetricName", "UnknownMetric"))
             level = str(r.get("DriftLevel", "Stable"))
             if level == "Severe":
@@ -105,6 +125,7 @@ def generate_alerts(
     if regime_df is not None and not regime_df.empty and "RegimeLabel" in regime_df.columns:
         recent = regime_df.copy()
         recent["Date"] = pd.to_datetime(recent["Date"], errors="coerce")
+        recent["RegimeLabel"] = recent["RegimeLabel"].map(_normalize_state_label)
         recent = recent.dropna(subset=["Date"]).sort_values("Date").tail(60)
         if len(recent) > 2:
             flips = _count_state_changes(recent["RegimeLabel"])
@@ -125,6 +146,8 @@ def generate_alerts(
         recent = risk_df.copy()
         recent["Date"] = pd.to_datetime(recent["Date"], errors="coerce")
         recent["RiskScore"] = pd.to_numeric(recent["RiskScore"], errors="coerce")
+        if "RiskLevel" in recent.columns:
+            recent["RiskLevel"] = recent["RiskLevel"].map(_normalize_state_label)
         recent = recent.dropna(subset=["Date", "RiskScore"]).sort_values("Date").tail(60)
         if not recent.empty:
             latest = float(recent["RiskScore"].iloc[-1])

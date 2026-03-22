@@ -118,3 +118,43 @@ def test_risk_evidence_json_sanitizes_non_finite_values():
     parsed = json.loads(text)
     assert isinstance(parsed, dict)
 
+
+def test_regime_evidence_normalizes_missing_and_case_variant_labels():
+    dates = pd.date_range("2025-01-01", periods=90, freq="B")
+    prices_df = pd.DataFrame(
+        {
+            "Ticker": ["SPY"] * len(dates),
+            "Date": dates,
+            "AdjClose": np.linspace(100, 110, len(dates)),
+            "Close": np.linspace(100, 110, len(dates)),
+            "Volume": 1_000_000,
+        }
+    )
+    treasury_df = pd.DataFrame({"Date": dates, "10Y": 4.0, "2Y": 4.3, "3M": 4.1})
+    regime_df = pd.DataFrame(
+        {
+            "Date": dates[-3:],
+            "RegimeLabel": [None, "risk off", " NaN "],
+            "ConfidenceScore": [0.7, 0.8, 0.6],
+        }
+    )
+
+    out = build_regime_evidence(prices_df=prices_df, treasury_df=treasury_df, regime_df=regime_df)
+
+    assert out["RegimeLabel"].tolist() == ["Neutral", "Risk Off", "Neutral"]
+
+
+def test_risk_evidence_normalizes_missing_and_case_variant_risk_levels():
+    dates = pd.date_range("2025-01-01", periods=5, freq="B")
+    risk_df = pd.DataFrame(
+        {
+            "Date": dates,
+            "RiskScore": [10, 20, 30, 40, 50],
+            "RiskLevel": [None, " elevated ", "NaN", "moderate", "LOW"],
+        }
+    )
+
+    out = build_risk_evidence(prices_df=pd.DataFrame(), treasury_df=None, risk_df=risk_df)
+
+    assert out["RiskLevel"].tolist() == ["Unknown", "Elevated", "Unknown", "Moderate", "Low"]
+

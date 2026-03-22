@@ -98,3 +98,53 @@ def test_alert_engine_sanitizes_non_finite_evidence_values():
     parsed = json.loads(text)
     assert parsed["DriftScore"] is None
 
+
+def test_alert_engine_handles_non_numeric_drift_score():
+    drift_df = pd.DataFrame(
+        [
+            {
+                "Date": pd.Timestamp("2026-01-10"),
+                "MetricName": "Momentum_252d",
+                "MetricType": "Feature",
+                "DriftScore": "bad-score",
+                "DriftLevel": "Drift",
+            }
+        ]
+    )
+
+    alerts = generate_alerts(
+        drift_df=drift_df,
+        regime_df=pd.DataFrame(),
+        risk_df=pd.DataFrame(),
+        coverage_stats={"treasury_exists": True, "prices_rows": 50000, "expected_min_price_rows": 50000},
+    )
+
+    assert len(alerts) == 1
+    assert "0.000" in alerts["Description"].iloc[0]
+
+
+def test_alert_engine_ignores_case_only_regime_and_risk_level_flips():
+    dates = pd.date_range("2026-01-01", periods=10, freq="B")
+    regime_df = pd.DataFrame(
+        {
+            "Date": dates,
+            "RegimeLabel": ["Risk Off", " risk off ", "RISK OFF", "Risk Off", "risk off", "RISK OFF", "Risk Off", "risk off", "RISK OFF", "Risk Off"],
+        }
+    )
+    risk_df = pd.DataFrame(
+        {
+            "Date": dates,
+            "RiskScore": [70.0] * len(dates),
+            "RiskLevel": ["Elevated", " elevated ", "ELEVATED", "Elevated", "elevated", "ELEVATED", "Elevated", "elevated", "ELEVATED", "Elevated"],
+        }
+    )
+
+    alerts = generate_alerts(
+        drift_df=pd.DataFrame(),
+        regime_df=regime_df,
+        risk_df=risk_df,
+        coverage_stats={"treasury_exists": True, "prices_rows": 50000, "expected_min_price_rows": 50000},
+    )
+
+    assert alerts.empty
+

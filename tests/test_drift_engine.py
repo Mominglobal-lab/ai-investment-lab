@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from ai_models.drift_engine import compute_feature_drift
+from ai_models.drift_engine import compute_feature_drift, compute_signal_instability
 
 
 def test_feature_drift_psi_thresholds():
@@ -59,4 +59,57 @@ def test_feature_drift_detects_shift_when_baseline_is_constant():
     mom = out[out["MetricName"] == "Momentum_252d"].iloc[0]
     assert mom["DriftScore"] > 0.25
     assert mom["DriftLevel"] == "Severe"
+
+
+def test_quality_proxy_drift_uses_current_quality_feature_names():
+    dates = pd.date_range("2025-01-01", periods=320, freq="B")
+    feature_history_df = pd.DataFrame(
+        {
+            "Date": dates,
+            "Revenue_Growth_YoY_Pct": [0.05] * 220 + [0.30] * 100,
+            "EBITDA_Margin": [0.10] * 220 + [0.35] * 100,
+            "ROE": [0.08] * 220 + [0.20] * 100,
+            "FreeCashFlow_Margin": [0.04] * 220 + [0.18] * 100,
+        }
+    )
+
+    out = compute_signal_instability(
+        regime_df=None,
+        risk_df=None,
+        quality_history_df=None,
+        feature_history_df=feature_history_df,
+    )
+
+    row = out[out["MetricName"] == "QualityProxyDrift"].iloc[0]
+    assert row["DriftScore"] > 0
+
+
+def test_signal_instability_ignores_case_only_label_flips():
+    dates = pd.date_range("2025-01-01", periods=20, freq="B")
+    regime_df = pd.DataFrame(
+        {
+            "Date": dates,
+            "RegimeLabel": ["Risk Off", " risk off ", "RISK OFF", "Risk Off"] * 5,
+            "ConfidenceScore": [0.6] * 20,
+        }
+    )
+    risk_df = pd.DataFrame(
+        {
+            "Date": dates,
+            "RiskScore": [50.0] * 20,
+            "RiskLevel": ["Moderate", " moderate ", "MODERATE", "Moderate"] * 5,
+        }
+    )
+
+    out = compute_signal_instability(
+        regime_df=regime_df,
+        risk_df=risk_df,
+        quality_history_df=None,
+        feature_history_df=None,
+    )
+
+    regime_row = out[out["MetricName"] == "RegimeFlipRate_60d"].iloc[0]
+    risk_row = out[out["MetricName"] == "RiskScoreVol_60d"].iloc[0]
+    assert regime_row["DriftScore"] == 0.0
+    assert "Level changes=0" in risk_row["Notes"]
 

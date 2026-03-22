@@ -33,6 +33,34 @@ def _detect_col(columns: list[str], candidates: list[str]) -> str | None:
     return None
 
 
+def _normalize_regime_label(value: object) -> str:
+    txt = str(value).strip() if pd.notna(value) else ""
+    low = txt.lower()
+    if low in {"", "nan", "none"}:
+        return "Neutral"
+    if low == "risk on":
+        return "Risk On"
+    if low == "risk off":
+        return "Risk Off"
+    if low == "neutral":
+        return "Neutral"
+    return txt
+
+
+def _normalize_risk_level(value: object) -> str:
+    txt = str(value).strip() if pd.notna(value) else ""
+    low = txt.lower()
+    if low in {"", "nan", "none"}:
+        return "Unknown"
+    if low == "low":
+        return "Low"
+    if low == "moderate":
+        return "Moderate"
+    if low == "elevated":
+        return "Elevated"
+    return txt
+
+
 def _build_benchmark_indicators(prices_df: pd.DataFrame, benchmark_ticker: str = "SPY") -> pd.DataFrame:
     p = prices_df.copy()
     p["Ticker"] = p["Ticker"].astype(str).str.upper().str.strip()
@@ -125,7 +153,7 @@ def build_regime_evidence(
 
     rows: list[dict[str, object]] = []
     for _, row in m.iterrows():
-        label = str(row.get("RegimeLabel", "Neutral"))
+        label = _normalize_regime_label(row.get("RegimeLabel", "Neutral"))
         inv = float(row.get("YC_Inversion", 0.0)) if pd.notna(row.get("YC_Inversion")) else 0.0
         vr = float(row.get("VolatilityRising", 0.0)) if pd.notna(row.get("VolatilityRising")) else 0.0
         steep = float(row.get("SlopeSteepening", 0.0)) if pd.notna(row.get("SlopeSteepening")) else 0.0
@@ -209,7 +237,7 @@ def build_risk_evidence(prices_df: pd.DataFrame, treasury_df: pd.DataFrame | Non
             {
                 "Date": row["Date"],
                 "RiskScore": float(row["RiskScore"]),
-                "RiskLevel": str(row.get("RiskLevel", "Unknown")),
+                "RiskLevel": _normalize_risk_level(row.get("RiskLevel", "Unknown")),
                 "TopRiskDrivers": ", ".join(top),
                 "EvidencePointsJSON": json.dumps(_json_safe(ev), sort_keys=True, allow_nan=False),
                 "ShortExplanation": short,
