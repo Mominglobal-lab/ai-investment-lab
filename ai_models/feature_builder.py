@@ -61,7 +61,10 @@ def _load_fundamentals(fundamentals_path: str) -> tuple[pd.DataFrame, list[str]]
     return out, warnings
 
 
-def _build_price_features(prices_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _build_price_features(
+    prices_df: pd.DataFrame,
+    benchmark_ticker: str = "SPY",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     px = prices_df.copy()
     px["Ticker"] = px["Ticker"].astype(str).str.upper().str.strip()
     px["Date"] = pd.to_datetime(px["Date"], errors="coerce")
@@ -70,6 +73,7 @@ def _build_price_features(prices_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Dat
 
     features: list[dict[str, Any]] = []
     macro_rows: list[dict[str, Any]] = []
+    benchmark_symbol = str(benchmark_ticker).upper().strip()
     for ticker, g in px.groupby("Ticker"):
         s = g.set_index("Date")["AdjClose"].sort_index()
         r1 = s.pct_change()
@@ -86,7 +90,7 @@ def _build_price_features(prices_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Dat
             feat["Drawdown_252D"] = float(dd.iloc[-1]) if not dd.empty else np.nan
         features.append(feat)
 
-        if ticker == "SPY":
+        if ticker == benchmark_symbol:
             spy_vol = r1.rolling(63).std() * np.sqrt(252)
             spy_trend = s.pct_change(252)
             macro_rows = [
@@ -153,6 +157,7 @@ def build_feature_table(
     fundamentals_path: str = FUNDAMENTALS_PATH,
     prices_path: str = PRICES_PATH,
     treasury_path: str = TREASURY_PATH,
+    benchmark_ticker: str = "SPY",
 ) -> FeatureBuildResult:
     warnings: list[str] = []
     fundamentals, fund_warn = _load_fundamentals(fundamentals_path)
@@ -164,7 +169,7 @@ def build_feature_table(
     if not {"Ticker", "Date", "AdjClose"}.issubset(set(prices.columns)):
         raise ValueError("Price cache missing required columns: Ticker, Date, AdjClose")
 
-    price_features, macro_series = _build_price_features(prices)
+    price_features, macro_series = _build_price_features(prices, benchmark_ticker=benchmark_ticker)
     latest_macro_vol = float(macro_series["Benchmark_Volatility"].dropna().iloc[-1]) if not macro_series.empty and not macro_series["Benchmark_Volatility"].dropna().empty else np.nan
     latest_macro_trend = float(macro_series["Benchmark_Trend"].dropna().iloc[-1]) if not macro_series.empty and not macro_series["Benchmark_Trend"].dropna().empty else np.nan
 

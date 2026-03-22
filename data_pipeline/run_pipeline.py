@@ -590,6 +590,7 @@ def run_decision_models_pipeline(
 
 def run_explainability_pipeline(
     *,
+    fundamentals_path: str = "data/fundamentals_cache.parquet",
     benchmark_ticker: str = "SPY",
     quality_scores_path: str = "data/quality_scores_cache.parquet",
     regime_cache_path: str = "data/regime_cache.parquet",
@@ -603,9 +604,10 @@ def run_explainability_pipeline(
     model_health_path: str = "data/model_health_report.json",
 ) -> ExplainabilityPipelineRunResult:
     feature_result = build_feature_table(
-        fundamentals_path="data/fundamentals_cache.parquet",
+        fundamentals_path=fundamentals_path,
         prices_path=prices_path,
         treasury_path=treasury_path,
+        benchmark_ticker=benchmark_ticker,
     )
     feature_df = feature_result.features.reset_index()
 
@@ -692,6 +694,7 @@ def run_explainability_pipeline(
 
 def run_uncertainty_pipeline(
     *,
+    fundamentals_path: str = "data/fundamentals_cache.parquet",
     benchmark_ticker: str = "SPY",
     prices_path: str = "data/prices_cache.parquet",
     treasury_path: str = "data/treasury_yields_cache.parquet",
@@ -705,9 +708,10 @@ def run_uncertainty_pipeline(
     model_health_path: str = "data/model_health_report.json",
 ) -> UncertaintyPipelineRunResult:
     feature_result = build_feature_table(
-        fundamentals_path="data/fundamentals_cache.parquet",
+        fundamentals_path=fundamentals_path,
         prices_path=prices_path,
         treasury_path=treasury_path,
+        benchmark_ticker=benchmark_ticker,
     )
     feature_df = feature_result.features.reset_index()
 

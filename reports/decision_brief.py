@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -80,14 +81,17 @@ def _artifact_rel_paths(run_id: str) -> dict[str, str]:
 
 
 def _html_table_from_pairs(pairs: list[tuple[str, Any]]) -> str:
-    rows = "".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in pairs)
+    rows = "".join(
+        f"<tr><th>{html.escape(str(k))}</th><td>{html.escape('' if v is None else str(v))}</td></tr>"
+        for k, v in pairs
+    )
     return f"<table>{rows}</table>"
 
 
 def _html_holdings(holdings: list[dict[str, Any]]) -> str:
     rows = "".join(
         "<tr>"
-        f"<td>{h.get('ticker')}</td>"
+        f"<td>{html.escape(str(h.get('ticker') or ''))}</td>"
         f"<td>{float(h.get('weight', 0.0)):.4f}</td>"
         "</tr>"
         for h in holdings
@@ -219,14 +223,15 @@ def generate_decision_brief(
         ("Worst Month", summary.get("worst_month")),
     ]
     risk_pairs_fmt = [(k, f"{float(v):.6f}" if isinstance(v, (int, float)) else v) for k, v in risk_pairs]
-    insights_html = "".join(f"<li>{x}</li>" for x in insights)
-    artifacts_html = "".join(f"<li>{a}</li>" for a in used_artifacts)
+    insights_html = "".join(f"<li>{html.escape(str(x))}</li>" for x in insights)
+    artifacts_html = "".join(f"<li>{html.escape(str(a))}</li>" for a in used_artifacts)
+    safe_title = html.escape(str(title))
 
     html = f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>{title}</title>
+<title>{safe_title}</title>
 <style>
 body {{ font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 28px; color: #0c1423; background: #f8fbff; }}
 h1, h2 {{ margin-bottom: 8px; }}
@@ -238,7 +243,7 @@ ul {{ margin: 8px 0 0 18px; }}
 </style>
 </head>
 <body>
-<h1>{title}</h1>
+<h1>{safe_title}</h1>
 <section><h2>Run Metadata</h2>{_html_table_from_pairs(metadata_pairs)}</section>
 <section><h2>Holdings</h2>{_html_holdings(portfolio.get("holdings", []) or [])}</section>
 <section><h2>Key Metrics</h2>{_html_metrics(summary)}</section>

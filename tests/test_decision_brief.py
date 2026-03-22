@@ -70,3 +70,20 @@ def test_decision_insights_are_deterministic_for_same_input(tmp_path):
     d2 = json.loads(Path(out2["json_path"]).read_text(encoding="utf-8"))
     assert d1["decision_insights"] == d2["decision_insights"]
 
+
+def test_generate_decision_brief_escapes_html_content(tmp_path):
+    sim = _sample_simulation_result()
+    sim["portfolio"]["holdings"][0]["ticker"] = '<script>alert("x")</script>'
+    sim["metadata"]["benchmark_ticker"] = '<b>QQQ</b>'
+    title = '<img src=x onerror=alert("x")>'
+
+    out = generate_decision_brief(simulation_result=sim, output_dir=str(tmp_path), format="html", title=title)
+    html_text = Path(out["html_path"]).read_text(encoding="utf-8")
+
+    assert '<script>alert("x")</script>' not in html_text
+    assert '<b>QQQ</b>' not in html_text
+    assert '<img src=x onerror=alert("x")>' not in html_text
+    assert "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;" in html_text
+    assert "&lt;b&gt;QQQ&lt;/b&gt;" in html_text
+    assert "&lt;img src=x onerror=alert(&quot;x&quot;)&gt;" in html_text
+
