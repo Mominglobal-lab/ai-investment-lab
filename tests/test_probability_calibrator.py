@@ -64,3 +64,18 @@ def test_initial_regime_stability_starts_at_one_for_constant_series():
 
     assert float(out["RegimeStability_20d"].iloc[0]) == 1.0
 
+
+def test_mixed_case_placeholder_regime_labels_default_to_neutral():
+    dates = pd.date_range("2025-01-01", periods=3, freq="B")
+    df = pd.DataFrame(
+        {
+            "Date": dates,
+            "RegimeLabel": ["NaN", " NONE ", "Risk On"],
+            "ConfidenceScore": [0.7, 0.7, 0.7],
+        }
+    )
+
+    out = build_regime_probabilities(df, window=2)
+
+    assert out["RegimeLabel"].tolist()[:2] == ["Neutral", "Neutral"]
+
