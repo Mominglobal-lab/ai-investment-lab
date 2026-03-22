@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timezone
 
 import numpy as np
@@ -18,6 +19,16 @@ def _percentile_rank(series: pd.Series, higher_is_better: bool = True) -> pd.Ser
     if not higher_is_better:
         s = -s
     return s.rank(pct=True, method="average").fillna(0.5)
+
+
+def _safe_json_float(value: object) -> float | None:
+    try:
+        out = float(value)
+    except Exception:
+        return None
+    if not math.isfinite(out):
+        return None
+    return out
 
 
 def _component_table(feature_df: pd.DataFrame) -> pd.DataFrame:
@@ -97,11 +108,11 @@ def build_quality_explanations(feature_df: pd.DataFrame, quality_df: pd.DataFram
             {
                 "Ticker": row["Ticker"],
                 "FeatureAsOfDate": _asof_date_iso(),
-                "QualityScore": float(row.get("QualityScore")) if pd.notna(row.get("QualityScore")) else np.nan,
+                "QualityScore": _safe_json_float(row.get("QualityScore")),
                 "QualityTier": str(row.get("QualityTier")) if pd.notna(row.get("QualityTier")) else "Unknown",
                 "TopPositiveDrivers": ", ".join(pos) if pos else "None",
                 "TopNegativeDrivers": ", ".join(neg) if neg else "None",
-                "ContributionJSON": json.dumps({k: float(v) for k, v in signed.items()}, sort_keys=True),
+                "ContributionJSON": json.dumps({k: _safe_json_float(v) for k, v in signed.items()}, sort_keys=True, allow_nan=False),
             }
         )
 

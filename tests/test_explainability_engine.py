@@ -43,3 +43,18 @@ def test_quality_explainability_handles_missing_features():
     contrib = json.loads(out.iloc[0]["ContributionJSON"])
     assert isinstance(contrib, dict)
 
+
+def test_quality_explainability_sanitizes_non_finite_json_values():
+    feature_df = pd.DataFrame([{"Ticker": "AAA"}])
+    quality_df = pd.DataFrame([{"Ticker": "AAA", "QualityScore": float("inf"), "QualityTier": "Neutral"}])
+
+    out = build_quality_explanations(feature_df, quality_df)
+
+    assert len(out) == 1
+    row = out.iloc[0]
+    assert pd.isna(row["QualityScore"])
+    assert "Infinity" not in row["ContributionJSON"]
+    assert "NaN" not in row["ContributionJSON"]
+    contrib = json.loads(row["ContributionJSON"])
+    assert isinstance(contrib, dict)
+
