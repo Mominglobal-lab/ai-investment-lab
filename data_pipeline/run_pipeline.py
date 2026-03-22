@@ -626,7 +626,12 @@ def run_explainability_pipeline(
         raise FileNotFoundError(f"Price cache missing or empty: {prices_path}")
 
     quality_explain = build_quality_explanations(feature_df=feature_df, quality_df=quality_df)
-    regime_evidence = build_regime_evidence(prices_df=prices_df, treasury_df=treasury_df, regime_df=regime_df)
+    regime_evidence = build_regime_evidence(
+        prices_df=prices_df,
+        treasury_df=treasury_df,
+        regime_df=regime_df,
+        benchmark_ticker=benchmark_ticker,
+    )
     risk_evidence = build_risk_evidence(prices_df=prices_df, treasury_df=treasury_df, risk_df=risk_df)
 
     save_parquet_atomic(quality_explain, quality_explain_path)

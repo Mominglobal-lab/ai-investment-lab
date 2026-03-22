@@ -21,7 +21,9 @@ def build_regime_probabilities(regime_df: pd.DataFrame, window: int = 20) -> pd.
     r = regime_df.copy()
     r["Date"] = pd.to_datetime(r["Date"], errors="coerce")
     r["ConfidenceScore"] = pd.to_numeric(r["ConfidenceScore"], errors="coerce").fillna(0.55)
-    r["RegimeLabel"] = r["RegimeLabel"].astype(str).fillna("Neutral")
+    r["RegimeLabel"] = r["RegimeLabel"].where(pd.notna(r["RegimeLabel"]), "Neutral")
+    r["RegimeLabel"] = r["RegimeLabel"].astype(str).str.strip()
+    r.loc[r["RegimeLabel"].isin({"", "nan", "None"}), "RegimeLabel"] = "Neutral"
     r = r.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
 
     out_rows: list[dict[str, object]] = []

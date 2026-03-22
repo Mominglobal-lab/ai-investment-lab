@@ -28,6 +28,22 @@ def _build_benchmark_indicators(prices_df: pd.DataFrame, benchmark_ticker: str =
     return pd.DataFrame({"Date": s.index, "BenchmarkVol_63d": vol63.values, "BenchmarkTrend_63d": trend63.values})
 
 
+def _regime_rule_and_explanation(label: str, inv: float, vr: float, steep: float) -> tuple[str, str]:
+    inversion = inv > 0.5
+    vol_rising = vr > 0.5
+    slope_steepening = steep > 0.5
+
+    if label == "Risk Off" and inversion and vol_rising:
+        return "inversion_and_volatility_rising", "Risk Off because curve is inverted and market volatility is rising."
+    if label == "Risk On" and slope_steepening and not vol_rising:
+        return "steepening_and_volatility_falling", "Risk On because curve is steepening while volatility is stable/falling."
+    if label == "Risk Off":
+        return "risk_off_label_without_full_confirmation", "Risk Off label is present, but the inversion and volatility conditions are not both confirmed."
+    if label == "Risk On":
+        return "risk_on_label_without_full_confirmation", "Risk On label is present, but the steepening and falling-volatility conditions are not both confirmed."
+    return "neutral_default", "Neutral because risk-on/off conditions are not jointly satisfied."
+
+
 def _build_yield_indicators(treasury_df: pd.DataFrame | None, dates: pd.DatetimeIndex) -> pd.DataFrame:
     if treasury_df is None or treasury_df.empty:
         out = pd.DataFrame({"Date": dates})
@@ -65,7 +81,12 @@ def _build_yield_indicators(treasury_df: pd.DataFrame | None, dates: pd.Datetime
     return out
 
 
-def build_regime_evidence(prices_df: pd.DataFrame, treasury_df: pd.DataFrame | None, regime_df: pd.DataFrame) -> pd.DataFrame:
+def build_regime_evidence(
+    prices_df: pd.DataFrame,
+    treasury_df: pd.DataFrame | None,
+    regime_df: pd.DataFrame,
+    benchmark_ticker: str = "SPY",
+) -> pd.DataFrame:
     if regime_df is None or regime_df.empty:
         return pd.DataFrame(columns=["Date", "RegimeLabel", "ConfidenceScore", "RuleTriggered", "EvidencePointsJSON", "ShortExplanation"])
 
@@ -74,7 +95,7 @@ def build_regime_evidence(prices_df: pd.DataFrame, treasury_df: pd.DataFrame | N
     r = r.dropna(subset=["Date"]).sort_values("Date")
     dates = pd.DatetimeIndex(r["Date"])
 
-    b = _build_benchmark_indicators(prices_df)
+    b = _build_benchmark_indicators(prices_df, benchmark_ticker=benchmark_ticker)
     b = b.set_index("Date").reindex(dates).ffill().reset_index().rename(columns={"index": "Date"})
     y = _build_yield_indicators(treasury_df, dates)
 
@@ -90,15 +111,7 @@ def build_regime_evidence(prices_df: pd.DataFrame, treasury_df: pd.DataFrame | N
         vr = float(row.get("VolatilityRising", 0.0)) if pd.notna(row.get("VolatilityRising")) else 0.0
         steep = float(row.get("SlopeSteepening", 0.0)) if pd.notna(row.get("SlopeSteepening")) else 0.0
 
-        if label == "Risk Off":
-            rule = "inversion_and_volatility_rising"
-            short = "Risk Off because curve is inverted and market volatility is rising."
-        elif label == "Risk On":
-            rule = "steepening_and_volatility_falling"
-            short = "Risk On because curve is steepening while volatility is stable/falling."
-        else:
-            rule = "neutral_default"
-            short = "Neutral because risk-on/off conditions are not jointly satisfied."
+        rule, short = _regime_rule_and_explanation(label, inv, vr, steep)
 
         evidence = {
             "YC_Slope_10Y_2Y": float(row.get("YC_Slope_10Y_2Y")) if pd.notna(row.get("YC_Slope_10Y_2Y")) else None,

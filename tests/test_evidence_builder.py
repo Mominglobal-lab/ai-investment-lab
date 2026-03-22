@@ -44,3 +44,63 @@ def test_risk_evidence_volatility_spike_driver_present():
     for k in required:
         assert k in ev
 
+
+def test_regime_evidence_uses_selected_benchmark():
+    dates = pd.date_range("2025-01-01", periods=90, freq="B")
+    prices_df = pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "Ticker": ["SPY"] * len(dates),
+                    "Date": dates,
+                    "AdjClose": [100.0] * len(dates),
+                    "Close": [100.0] * len(dates),
+                    "Volume": [1_000_000] * len(dates),
+                }
+            ),
+            pd.DataFrame(
+                {
+                    "Ticker": ["QQQ"] * len(dates),
+                    "Date": dates,
+                    "AdjClose": np.linspace(100, 140, len(dates)),
+                    "Close": np.linspace(100, 140, len(dates)),
+                    "Volume": [1_000_000] * len(dates),
+                }
+            ),
+        ],
+        ignore_index=True,
+    )
+    treasury_df = pd.DataFrame({"Date": dates, "10Y": 4.0, "2Y": 3.7, "3M": 3.8})
+    regime_df = pd.DataFrame({"Date": dates, "RegimeLabel": ["Risk On"] * len(dates), "ConfidenceScore": [0.8] * len(dates)})
+
+    out = build_regime_evidence(
+        prices_df=prices_df,
+        treasury_df=treasury_df,
+        regime_df=regime_df,
+        benchmark_ticker="QQQ",
+    )
+
+    ev = json.loads(out["EvidencePointsJSON"].iloc[-1])
+    assert ev["BenchmarkTrend_63d"] is not None
+    assert ev["BenchmarkTrend_63d"] > 0
+
+
+def test_regime_evidence_does_not_overstate_unconfirmed_conditions():
+    dates = pd.date_range("2025-01-01", periods=90, freq="B")
+    prices_df = pd.DataFrame(
+        {
+            "Ticker": ["SPY"] * len(dates),
+            "Date": dates,
+            "AdjClose": [100.0] * len(dates),
+            "Close": [100.0] * len(dates),
+            "Volume": [1_000_000] * len(dates),
+        }
+    )
+    treasury_df = pd.DataFrame({"Date": dates, "10Y": 4.0, "2Y": 3.5, "3M": 3.7})
+    regime_df = pd.DataFrame({"Date": dates, "RegimeLabel": ["Risk Off"] * len(dates), "ConfidenceScore": [0.8] * len(dates)})
+
+    out = build_regime_evidence(prices_df=prices_df, treasury_df=treasury_df, regime_df=regime_df)
+
+    assert out["RuleTriggered"].iloc[-1] == "risk_off_label_without_full_confirmation"
+    assert "not both confirmed" in out["ShortExplanation"].iloc[-1]
+

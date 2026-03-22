@@ -32,3 +32,20 @@ def test_regime_stability_behaves_for_stable_and_flipping_series():
     s2 = build_regime_probabilities(flipping, window=20)
     assert s1["RegimeStability_20d"].iloc[-1] > s2["RegimeStability_20d"].iloc[-1]
 
+
+def test_missing_regime_labels_default_to_neutral():
+    dates = pd.date_range("2025-01-01", periods=3, freq="B")
+    df = pd.DataFrame(
+        {
+            "Date": dates,
+            "RegimeLabel": [None, "", "nan"],
+            "ConfidenceScore": [0.7, 0.7, 0.7],
+        }
+    )
+
+    out = build_regime_probabilities(df, window=2)
+
+    assert set(out["RegimeLabel"]) == {"Neutral"}
+    assert (out["P_Neutral"] > out["P_RiskOn"]).all()
+    assert (out["P_Neutral"] > out["P_RiskOff"]).all()
+
