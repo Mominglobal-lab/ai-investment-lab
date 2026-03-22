@@ -33,6 +33,13 @@ def _normalize_tickers(series: pd.Series) -> pd.Series:
     return out
 
 
+def _normalize_quality_tier(value: object, default: str) -> str:
+    txt = str(value).strip() if pd.notna(value) else ""
+    if txt in {"", "nan", "None"}:
+        return default
+    return txt
+
+
 def _score_frame(df: pd.DataFrame) -> pd.DataFrame:
     x = df.copy()
     if "Ticker" not in x.columns:
@@ -112,7 +119,10 @@ def build_quality_uncertainty(
         out["ScoreP10"] = out["ScoreMean"]
         out["ScoreP50"] = out["ScoreMean"]
         out["ScoreP90"] = out["ScoreMean"]
-        out["TierMostLikely"] = out.get("QualityTier", "Unknown")
+        out["TierMostLikely"] = [
+            _normalize_quality_tier(v, default="Unknown")
+            for v in out.get("QualityTier", pd.Series(["Unknown"] * len(out)))
+        ]
         out["TierStability"] = 1.0
         return out[
             ["Ticker", "FeatureAsOfDate", "ScoreMean", "ScoreP10", "ScoreP50", "ScoreP90", "TierMostLikely", "TierStability"]
@@ -145,7 +155,7 @@ def build_quality_uncertainty(
         if not vals:
             point = float(pd.to_numeric(r.get("QualityScore"), errors="coerce")) if pd.notna(r.get("QualityScore")) else np.nan
             vals = [point] if pd.notna(point) else [50.0]
-            tier_guess = str(r.get("QualityTier", _tier_from_score(vals[0])))
+            tier_guess = _normalize_quality_tier(r.get("QualityTier"), default=_tier_from_score(vals[0]))
             tiers = [tier_guess]
 
         arr = np.array(vals, dtype=float)

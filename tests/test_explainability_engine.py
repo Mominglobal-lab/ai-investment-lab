@@ -91,3 +91,12 @@ def test_quality_explainability_deduplicates_tickers():
 
     assert out["Ticker"].tolist() == ["AAA"]
 
+
+def test_quality_explainability_normalizes_missing_quality_tier():
+    feature_df = pd.DataFrame([{"Ticker": "AAA", "Revenue_Growth_YoY_Pct": 10}])
+    quality_df = pd.DataFrame([{"Ticker": "AAA", "QualityScore": 80, "QualityTier": None}])
+
+    out = build_quality_explanations(feature_df, quality_df)
+
+    assert out.iloc[0]["QualityTier"] == "Unknown"
+

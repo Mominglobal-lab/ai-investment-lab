@@ -41,3 +41,12 @@ def test_quality_uncertainty_deduplicates_tickers():
     out = build_quality_uncertainty(feature_df, quality_df, n_boot=10, seed=1)
 
     assert out["Ticker"].tolist() == ["AAA"]
+
+
+def test_quality_uncertainty_normalizes_missing_quality_tier():
+    feature_df = pd.DataFrame()
+    quality_df = pd.DataFrame([{"Ticker": "AAA", "QualityScore": 70, "QualityTier": None}])
+
+    out = build_quality_uncertainty(feature_df, quality_df, n_boot=10, seed=1)
+
+    assert out.iloc[0]["TierMostLikely"] == "Unknown"

@@ -37,6 +37,13 @@ def _normalize_tickers(series: pd.Series) -> pd.Series:
     return out
 
 
+def _normalize_quality_tier(value: object, default: str = "Unknown") -> str:
+    txt = str(value).strip() if pd.notna(value) else ""
+    if txt in {"", "nan", "None"}:
+        return default
+    return txt
+
+
 def _component_table(feature_df: pd.DataFrame) -> pd.DataFrame:
     f = feature_df.copy()
     if "Ticker" not in f.columns:
@@ -130,7 +137,7 @@ def build_quality_explanations(feature_df: pd.DataFrame, quality_df: pd.DataFram
                 "Ticker": row["Ticker"],
                 "FeatureAsOfDate": _asof_date_iso(),
                 "QualityScore": _safe_json_float(row.get("QualityScore")),
-                "QualityTier": str(row.get("QualityTier")) if pd.notna(row.get("QualityTier")) else "Unknown",
+                "QualityTier": _normalize_quality_tier(row.get("QualityTier")),
                 "TopPositiveDrivers": ", ".join(pos) if pos else "None",
                 "TopNegativeDrivers": ", ".join(neg) if neg else "None",
                 "ContributionJSON": json.dumps({k: _safe_json_float(v) for k, v in signed.items()}, sort_keys=True, allow_nan=False),
