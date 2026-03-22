@@ -329,13 +329,16 @@ def simulate_portfolio(
     benchmark_symbol = str(benchmark or "").strip().upper()
     benchmark_value: pd.Series | None = None
     benchmark_returns: pd.Series | None = None
+    simulation_start = holdings_prices.index.min()
+    simulation_end = holdings_prices.index.max()
     if benchmark_symbol and benchmark_symbol in pivot.columns:
         b_prices = pivot[benchmark_symbol].dropna()
-        b_returns = b_prices.pct_change().dropna()
-        b_returns = b_returns.reindex(portfolio_returns.index).dropna()
-        if not b_returns.empty:
-            benchmark_returns = b_returns
-            benchmark_value = initial_capital * (1.0 + b_returns).cumprod()
+        b_window = b_prices[(b_prices.index >= simulation_start) & (b_prices.index <= simulation_end)]
+        b_window = b_window.reindex(holdings_prices.index).ffill().dropna()
+        if len(b_window) >= 2:
+            benchmark_returns = b_window.pct_change().dropna()
+            benchmark_returns = benchmark_returns.reindex(portfolio_returns.index).dropna()
+            benchmark_value = initial_capital * (b_window / float(b_window.iloc[0]))
             benchmark_value = benchmark_value.reindex(portfolio_returns.index)
 
     summary = _compute_summary_metrics(
@@ -363,8 +366,8 @@ def simulate_portfolio(
     result = {
         "metadata": {
             "run_timestamp": _utc_now_iso(),
-            "period_start": portfolio_returns.index.min().strftime("%Y-%m-%d"),
-            "period_end": portfolio_returns.index.max().strftime("%Y-%m-%d"),
+            "period_start": simulation_start.strftime("%Y-%m-%d"),
+            "period_end": simulation_end.strftime("%Y-%m-%d"),
             "rebalance_rule": rebalance_rule,
             "benchmark_ticker": benchmark_symbol,
             "simulation_mode": mode,

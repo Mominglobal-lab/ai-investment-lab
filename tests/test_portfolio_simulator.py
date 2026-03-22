@@ -119,3 +119,23 @@ def test_monthly_rebalance_logic(monkeypatch):
     assert pytest.approx(end_none, rel=1e-9) == 10000.0
     assert pytest.approx(end_monthly, rel=1e-9) == 11250.0
 
+
+def test_benchmark_growth_and_metadata_use_full_price_window(monkeypatch):
+    prices = _make_prices(
+        [
+            ("AAA", "2025-01-01", 100),
+            ("AAA", "2025-01-02", 110),
+            ("AAA", "2025-01-03", 121),
+            ("SPY", "2025-01-01", 100),
+            ("SPY", "2025-01-02", 120),
+            ("SPY", "2025-01-03", 144),
+        ]
+    )
+    monkeypatch.setattr(pd, "read_parquet", lambda *_args, **_kwargs: prices.copy())
+
+    res = simulate_portfolio([("AAA", 1.0)], lookback_years=5, strict=True, benchmark="SPY")
+
+    assert res["metadata"]["period_start"] == "2025-01-01"
+    assert res["metadata"]["period_end"] == "2025-01-03"
+    assert pytest.approx(res["timeseries"]["benchmark_value"][-1], rel=1e-9) == 14400.0
+
