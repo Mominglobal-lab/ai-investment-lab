@@ -30,20 +30,25 @@ def _load_fundamentals(fundamentals_path: str) -> tuple[pd.DataFrame, list[str]]
     warnings: list[str] = []
     df = _safe_read_parquet(fundamentals_path)
     if df is None or df.empty:
-        fallback_paths = [
-            "data/fundamentals_cache_sp500.parquet",
-            "data/fundamentals_cache_nasdaq100.parquet",
-        ]
-        frames: list[pd.DataFrame] = []
-        for fp in fallback_paths:
-            f = _safe_read_parquet(fp)
-            if f is not None and not f.empty:
-                frames.append(f.copy())
-        if frames:
-            df = pd.concat(frames, axis=0, ignore_index=True)
-            warnings.append("Primary fundamentals cache missing; used segmented fundamentals caches.")
+        # Only use segmented-cache fallback for the default shared fundamentals path.
+        # For custom paths, silently mixing in unrelated segmented universes can corrupt runs.
+        if fundamentals_path == FUNDAMENTALS_PATH:
+            fallback_paths = [
+                "data/fundamentals_cache_sp500.parquet",
+                "data/fundamentals_cache_nasdaq100.parquet",
+            ]
+            frames: list[pd.DataFrame] = []
+            for fp in fallback_paths:
+                f = _safe_read_parquet(fp)
+                if f is not None and not f.empty:
+                    frames.append(f.copy())
+            if frames:
+                df = pd.concat(frames, axis=0, ignore_index=True)
+                warnings.append("Primary fundamentals cache missing; used segmented fundamentals caches.")
+            else:
+                return pd.DataFrame(), ["Fundamentals cache not found or empty."]
         else:
-            return pd.DataFrame(), ["Fundamentals cache not found or empty."]
+            return pd.DataFrame(), [f"Fundamentals cache not found or empty: {fundamentals_path}"]
 
     out = df.copy()
     if "Ticker" not in out.columns:

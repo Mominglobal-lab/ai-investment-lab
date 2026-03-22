@@ -33,7 +33,7 @@ def test_explainability_pipeline_passes_custom_context(monkeypatch):
     monkeypatch.setattr(rp, "build_feature_table", _fake_build_feature_table)
     monkeypatch.setattr(rp, "read_parquet_safe", _fake_read_parquet_safe)
     monkeypatch.setattr(rp, "build_quality_explanations", lambda feature_df, quality_df: pd.DataFrame([{"Ticker": "AAPL"}]))
-    monkeypatch.setattr(rp, "build_regime_evidence", lambda prices_df, treasury_df, regime_df: pd.DataFrame([{"Date": "2025-01-02"}]))
+    monkeypatch.setattr(rp, "build_regime_evidence", lambda prices_df, treasury_df, regime_df, benchmark_ticker=None: pd.DataFrame([{"Date": "2025-01-02"}]))
     monkeypatch.setattr(rp, "build_risk_evidence", lambda prices_df, treasury_df, risk_df: pd.DataFrame([{"Date": "2025-01-02"}]))
     monkeypatch.setattr(rp, "save_parquet_atomic", lambda df, path: None)
     monkeypatch.setattr(rp, "write_json_report", lambda payload, path: None)

@@ -65,3 +65,26 @@ def test_build_feature_table_uses_selected_benchmark(tmp_path):
     assert "Benchmark_Trend" in features.columns
     assert features["Benchmark_Trend"].notna().all()
     assert float(features["Benchmark_Trend"].iloc[0]) > 0.0
+
+
+def test_build_feature_table_does_not_fallback_to_segmented_caches_for_custom_missing_path(tmp_path):
+    prices_path = tmp_path / "prices.parquet"
+    treasury_path = tmp_path / "treasury.parquet"
+
+    dates = pd.bdate_range("2025-01-01", periods=40)
+    pd.DataFrame(
+        [
+            {"Ticker": "QQQ", "Date": dt, "AdjClose": 100.0 + i, "Close": 100.0 + i, "Volume": 1_000_000}
+            for i, dt in enumerate(dates)
+        ]
+    ).to_parquet(prices_path, index=False)
+    pd.DataFrame([{"Date": dt, "10Y": 4.0, "2Y": 3.8, "3M": 3.9} for dt in dates]).to_parquet(treasury_path, index=False)
+
+    out = build_feature_table(
+        fundamentals_path=str(tmp_path / "missing_custom_fundamentals.parquet"),
+        prices_path=str(prices_path),
+        treasury_path=str(treasury_path),
+        benchmark_ticker="QQQ",
+    )
+
+    assert any("missing_custom_fundamentals.parquet" in w for w in out.warnings)
