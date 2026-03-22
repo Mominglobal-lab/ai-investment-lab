@@ -39,7 +39,11 @@ def _psi_from_arrays(base: np.ndarray, curr: np.ndarray, n_bins: int = 10) -> fl
     quantiles = np.linspace(0, 1, n_bins + 1)
     bins = np.unique(np.quantile(base, quantiles))
     if len(bins) < 3:
-        return 0.0
+        base_mean = float(np.nanmean(base)) if len(base) else 0.0
+        curr_mean = float(np.nanmean(curr)) if len(curr) else 0.0
+        base_std = float(np.nanstd(base)) if len(base) else 0.0
+        scale = max(base_std, 1e-6)
+        return float(abs(curr_mean - base_mean) / scale)
     b_hist, _ = np.histogram(base, bins=bins)
     c_hist, _ = np.histogram(curr, bins=bins)
     b_pct = np.clip(b_hist / max(np.sum(b_hist), 1), 1e-6, None)

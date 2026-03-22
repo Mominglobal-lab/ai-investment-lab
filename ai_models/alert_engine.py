@@ -76,7 +76,7 @@ def generate_alerts(
                     _mk_alert(
                         date=r.get("Date", now),
                         severity="Warning",
-                        alert_type="SignalInstability" if str(r.get("MetricType")) == "Signal" else "SevereFeatureDrift",
+                        alert_type="SignalInstability" if str(r.get("MetricType")) == "Signal" else "FeatureDrift",
                         title=f"Drift warning: {name}",
                         description=f"{name} drift score is {score:.3f}, above drift threshold.",
                         evidence={"MetricName": name, "DriftScore": score, "DriftLevel": level},

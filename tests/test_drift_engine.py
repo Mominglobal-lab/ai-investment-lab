@@ -33,3 +33,30 @@ def test_feature_drift_psi_thresholds():
     assert mom["DriftScore"] > 0.10
     assert mom["DriftLevel"] in {"Drift", "Severe"}
 
+
+def test_feature_drift_detects_shift_when_baseline_is_constant():
+    dates = pd.date_range("2024-01-01", periods=120, freq="B")
+    tickers = [f"T{i:03d}" for i in range(25)]
+    rows = []
+    for d in dates:
+        current_val = 5.0 if d >= dates[-20] else 0.0
+        for t in tickers:
+            rows.append(
+                {
+                    "Date": d,
+                    "Ticker": t,
+                    "Momentum_252d": current_val,
+                }
+            )
+    df = pd.DataFrame(rows)
+    b0 = dates[0]
+    b1 = dates[-21]
+    c0 = dates[-20]
+    c1 = dates[-1]
+
+    out = compute_feature_drift(df, baseline_window=(b0, b1), current_window=(c0, c1))
+
+    mom = out[out["MetricName"] == "Momentum_252d"].iloc[0]
+    assert mom["DriftScore"] > 0.25
+    assert mom["DriftLevel"] == "Severe"
+
