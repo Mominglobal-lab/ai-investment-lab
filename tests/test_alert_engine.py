@@ -148,3 +148,55 @@ def test_alert_engine_ignores_case_only_regime_and_risk_level_flips():
 
     assert alerts.empty
 
+
+def test_alert_engine_drops_non_finite_risk_scores_from_risk_alerts():
+    risk_df = pd.DataFrame(
+        {
+            "Date": pd.date_range("2026-01-01", periods=8, freq="B"),
+            "RiskScore": [60.0, 62.0, 64.0, float("inf"), 68.0, 72.0, 78.0, 85.0],
+            "RiskLevel": ["Moderate", "Moderate", "Moderate", "Elevated", "Elevated", "Elevated", "Elevated", "Elevated"],
+        }
+    )
+
+    alerts = generate_alerts(
+        drift_df=pd.DataFrame(),
+        regime_df=pd.DataFrame(),
+        risk_df=risk_df,
+        coverage_stats={"treasury_exists": True, "prices_rows": 50000, "expected_min_price_rows": 50000},
+    )
+
+    text = "\n".join(alerts["Description"].astype(str).tolist())
+    assert "inf" not in text.lower()
+    assert "nan" not in text.lower()
+
+
+def test_alert_engine_normalizes_drift_level_strings():
+    drift_df = pd.DataFrame(
+        [
+            {
+                "Date": pd.Timestamp("2026-01-10"),
+                "MetricName": "Momentum_252d",
+                "MetricType": "Feature",
+                "DriftScore": 0.3,
+                "DriftLevel": " severe ",
+            },
+            {
+                "Date": pd.Timestamp("2026-01-11"),
+                "MetricName": "RiskScoreVol_60d",
+                "MetricType": "Signal",
+                "DriftScore": 0.12,
+                "DriftLevel": "drift",
+            },
+        ]
+    )
+
+    alerts = generate_alerts(
+        drift_df=drift_df,
+        regime_df=pd.DataFrame(),
+        risk_df=pd.DataFrame(),
+        coverage_stats={"treasury_exists": True, "prices_rows": 50000, "expected_min_price_rows": 50000},
+    )
+
+    assert len(alerts) == 2
+    assert set(alerts["Severity"]) == {"Critical", "Warning"}
+

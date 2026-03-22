@@ -183,23 +183,25 @@ def build_quality_uncertainty(
 
 
 def build_risk_uncertainty(risk_df: pd.DataFrame, window: int = 252) -> pd.DataFrame:
+    empty_cols = [
+        "Date",
+        "RiskScore",
+        "RiskP10",
+        "RiskP50",
+        "RiskP90",
+        "RiskLevelMostLikely",
+        "RiskLevelStability",
+    ]
     if risk_df is None or risk_df.empty:
-        return pd.DataFrame(
-            columns=[
-                "Date",
-                "RiskScore",
-                "RiskP10",
-                "RiskP50",
-                "RiskP90",
-                "RiskLevelMostLikely",
-                "RiskLevelStability",
-            ]
-        )
+        return pd.DataFrame(columns=empty_cols)
 
     r = risk_df.copy()
     r["Date"] = pd.to_datetime(r["Date"], errors="coerce")
     r["RiskScore"] = pd.to_numeric(r["RiskScore"], errors="coerce")
+    r.loc[~np.isfinite(r["RiskScore"]), "RiskScore"] = np.nan
     r = r.dropna(subset=["Date", "RiskScore"]).sort_values("Date").reset_index(drop=True)
+    if r.empty:
+        return pd.DataFrame(columns=empty_cols)
 
     deltas = r["RiskScore"].diff()
 

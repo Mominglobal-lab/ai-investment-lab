@@ -83,6 +83,16 @@ def _normalize_state_label(value: Any) -> str:
     return txt
 
 
+def _normalize_drift_level(value: Any) -> str:
+    txt = str(value).strip() if pd.notna(value) else ""
+    low = txt.lower()
+    if low == "severe":
+        return "Severe"
+    if low == "drift":
+        return "Drift"
+    return "Stable"
+
+
 def generate_alerts(
     drift_df: pd.DataFrame,
     regime_df: pd.DataFrame | None,
@@ -96,7 +106,7 @@ def generate_alerts(
         for _, r in drift_df.iterrows():
             score = _safe_float(r.get("DriftScore", 0.0))
             name = str(r.get("MetricName", "UnknownMetric"))
-            level = str(r.get("DriftLevel", "Stable"))
+            level = _normalize_drift_level(r.get("DriftLevel", "Stable"))
             if level == "Severe":
                 alerts.append(
                     _mk_alert(
@@ -146,12 +156,13 @@ def generate_alerts(
         recent = risk_df.copy()
         recent["Date"] = pd.to_datetime(recent["Date"], errors="coerce")
         recent["RiskScore"] = pd.to_numeric(recent["RiskScore"], errors="coerce")
+        recent.loc[~pd.Series(recent["RiskScore"]).apply(math.isfinite), "RiskScore"] = pd.NA
         if "RiskLevel" in recent.columns:
             recent["RiskLevel"] = recent["RiskLevel"].map(_normalize_state_label)
         recent = recent.dropna(subset=["Date", "RiskScore"]).sort_values("Date").tail(60)
         if not recent.empty:
-            latest = float(recent["RiskScore"].iloc[-1])
-            slope = float(recent["RiskScore"].diff(5).iloc[-1]) if len(recent) > 6 else 0.0
+            latest = _safe_float(recent["RiskScore"].iloc[-1])
+            slope = _safe_float(recent["RiskScore"].diff(5).iloc[-1]) if len(recent) > 6 else 0.0
             if latest >= 65 and slope > 5:
                 alerts.append(
                     _mk_alert(

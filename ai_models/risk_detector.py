@@ -115,7 +115,8 @@ def run_systemic_risk_detector(
     # Normalize indicators to [0,1] scale using robust percentile clipping.
     def _norm(s: pd.Series) -> pd.Series:
         x = s.fillna(0.0)
-        p95 = float(np.nanpercentile(x.values, 95)) if len(x) else 1.0
+        finite = x.values[np.isfinite(x.values)]
+        p95 = float(np.nanpercentile(finite, 95)) if len(finite) else 1.0
         if p95 <= 0:
             p95 = 1.0
         return (x / p95).clip(lower=0.0, upper=1.0)

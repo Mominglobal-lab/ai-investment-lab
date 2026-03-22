@@ -50,3 +50,25 @@ def test_monitoring_reports_normalize_drift_level_strings():
 
     assert "overall Severe drift" in report["short_narrative_summary"]
     assert health["worst_drift_level"] == "Severe"
+
+
+def test_build_drift_report_sorts_with_malformed_drift_scores():
+    drift_df = pd.DataFrame(
+        [
+            {"MetricName": "FeatureA", "MetricType": "Feature", "DriftScore": "bad", "DriftLevel": "Drift"},
+            {"MetricName": "FeatureB", "MetricType": "Feature", "DriftScore": 0.4, "DriftLevel": "Severe"},
+            {"MetricName": "SignalA", "MetricType": "Signal", "DriftScore": None, "DriftLevel": "Stable"},
+            {"MetricName": "SignalB", "MetricType": "Signal", "DriftScore": 0.3, "DriftLevel": "Drift"},
+        ]
+    )
+
+    report = build_drift_report(
+        drift_df,
+        baseline_window=(pd.Timestamp("2025-01-01"), pd.Timestamp("2025-06-30")),
+        current_window=(pd.Timestamp("2025-07-01"), pd.Timestamp("2025-12-31")),
+        coverage_stats={},
+        warnings=[],
+    )
+
+    assert report["top_drifting_features"][0]["MetricName"] == "FeatureB"
+    assert report["top_drifting_signals"][0]["MetricName"] == "SignalB"

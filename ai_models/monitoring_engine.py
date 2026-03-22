@@ -40,8 +40,9 @@ def build_drift_report(
         top_features = []
         top_signals = []
     else:
-        f = d[d["MetricType"] == "Feature"].sort_values("DriftScore", ascending=False).head(5)
-        s = d[d["MetricType"] == "Signal"].sort_values("DriftScore", ascending=False).head(5)
+        d["DriftScoreSort"] = d["DriftScore"].map(_safe_float)
+        f = d[d["MetricType"] == "Feature"].sort_values("DriftScoreSort", ascending=False).head(5)
+        s = d[d["MetricType"] == "Signal"].sort_values("DriftScoreSort", ascending=False).head(5)
         top_features = [
             {"MetricName": str(r["MetricName"]), "DriftScore": _safe_float(r["DriftScore"]), "DriftLevel": str(r["DriftLevel"])}
             for _, r in f.iterrows()
