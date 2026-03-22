@@ -82,6 +82,10 @@ def run_quality_score_model(
             "QualityScore": score.loc[valid_mask].astype(float).reset_index(drop=True),
         }
     )
+    if not out.empty:
+        keep_mask = ~out["Ticker"].duplicated(keep="last")
+        out = out.loc[keep_mask].reset_index(drop=True)
+        components = components.loc[keep_mask].reset_index(drop=True)
     out["QualityTier"] = out["QualityScore"].map(_tier_from_score)
 
     labels = {

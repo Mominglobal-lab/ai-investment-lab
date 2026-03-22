@@ -71,3 +71,16 @@ def test_quality_score_drops_missing_tickers():
 
     assert out["Ticker"].tolist() == ["AAA"]
 
+
+def test_quality_score_deduplicates_tickers():
+    features = pd.DataFrame(
+        [
+            {"Ticker": "AAA", "Revenue_Growth_YoY_Pct": 10},
+            {"Ticker": "AAA", "Revenue_Growth_YoY_Pct": 20},
+        ]
+    )
+
+    out = run_quality_score_model(features)
+
+    assert out["Ticker"].tolist() == ["AAA"]
+
