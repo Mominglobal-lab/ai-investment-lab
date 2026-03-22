@@ -72,3 +72,22 @@ def test_quality_explainability_drops_missing_tickers():
 
     assert out["Ticker"].tolist() == ["AAA"]
 
+
+def test_quality_explainability_deduplicates_tickers():
+    feature_df = pd.DataFrame(
+        [
+            {"Ticker": "AAA", "Revenue_Growth_YoY_Pct": 10},
+            {"Ticker": "AAA", "Revenue_Growth_YoY_Pct": 20},
+        ]
+    )
+    quality_df = pd.DataFrame(
+        [
+            {"Ticker": "AAA", "QualityScore": 70, "QualityTier": "Strong"},
+            {"Ticker": "AAA", "QualityScore": 75, "QualityTier": "Strong"},
+        ]
+    )
+
+    out = build_quality_explanations(feature_df, quality_df)
+
+    assert out["Ticker"].tolist() == ["AAA"]
+

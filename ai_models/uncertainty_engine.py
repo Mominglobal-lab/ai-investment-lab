@@ -85,7 +85,7 @@ def build_quality_uncertainty(
 
     q = quality_df.copy()
     q["Ticker"] = _normalize_tickers(q["Ticker"])
-    q = q.dropna(subset=["Ticker"]).reset_index(drop=True)
+    q = q.dropna(subset=["Ticker"]).drop_duplicates(subset=["Ticker"], keep="last").reset_index(drop=True)
     if q.empty:
         return pd.DataFrame(
             columns=[
@@ -104,7 +104,7 @@ def build_quality_uncertainty(
     if "Ticker" not in f.columns:
         f = f.reset_index().rename(columns={"index": "Ticker"})
     f["Ticker"] = _normalize_tickers(f["Ticker"])
-    f = f.dropna(subset=["Ticker"]).reset_index(drop=True)
+    f = f.dropna(subset=["Ticker"]).drop_duplicates(subset=["Ticker"], keep="last").reset_index(drop=True)
     if f.empty:
         out = q.copy()
         out["FeatureAsOfDate"] = _asof_date_iso()

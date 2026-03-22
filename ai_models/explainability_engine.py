@@ -76,7 +76,7 @@ def build_quality_explanations(feature_df: pd.DataFrame, quality_df: pd.DataFram
 
     q = quality_df.copy()
     q["Ticker"] = _normalize_tickers(q["Ticker"])
-    q = q.dropna(subset=["Ticker"]).reset_index(drop=True)
+    q = q.dropna(subset=["Ticker"]).drop_duplicates(subset=["Ticker"], keep="last").reset_index(drop=True)
     if q.empty:
         return pd.DataFrame(
             columns=[
@@ -91,7 +91,7 @@ def build_quality_explanations(feature_df: pd.DataFrame, quality_df: pd.DataFram
         )
     comp = _component_table(feature_df)
     comp["Ticker"] = _normalize_tickers(comp["Ticker"])
-    comp = comp.dropna(subset=["Ticker"]).reset_index(drop=True)
+    comp = comp.dropna(subset=["Ticker"]).drop_duplicates(subset=["Ticker"], keep="last").reset_index(drop=True)
     merged = q.merge(comp, on="Ticker", how="left")
 
     weights = dict(DEFAULT_WEIGHTS)
