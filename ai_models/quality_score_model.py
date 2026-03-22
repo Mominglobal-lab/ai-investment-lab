@@ -31,6 +31,12 @@ def _tier_from_score(score: float) -> str:
     return "Weak"
 
 
+def _normalize_tickers(series: pd.Series) -> pd.Series:
+    out = series.astype(str).str.upper().str.strip()
+    out = out.where(~out.isin(["", "NAN", "NONE"]), pd.NA)
+    return out
+
+
 def run_quality_score_model(
     features: pd.DataFrame,
     *,
@@ -67,10 +73,13 @@ def run_quality_score_model(
     weighted = sum(components[c] * w.get(c, 0.0) for c in components.columns)
     score = (weighted * 100.0).clip(0, 100)
 
+    tickers = _normalize_tickers(df["Ticker"])
+    valid_mask = tickers.notna()
+    components = components.loc[valid_mask].reset_index(drop=True)
     out = pd.DataFrame(
         {
-            "Ticker": df["Ticker"].astype(str).str.upper().str.strip(),
-            "QualityScore": score.astype(float),
+            "Ticker": tickers.loc[valid_mask].reset_index(drop=True),
+            "QualityScore": score.loc[valid_mask].astype(float).reset_index(drop=True),
         }
     )
     out["QualityTier"] = out["QualityScore"].map(_tier_from_score)

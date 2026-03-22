@@ -58,3 +58,16 @@ def test_quality_score_handles_missing_feature_columns():
     assert out["QualityScore"].between(0, 100).all()
     assert set(out["QualityTier"].unique()).issubset({"Strong", "Neutral", "Weak"})
 
+
+def test_quality_score_drops_missing_tickers():
+    features = pd.DataFrame(
+        [
+            {"Ticker": None, "Revenue_Growth_YoY_Pct": 10},
+            {"Ticker": "AAA", "Revenue_Growth_YoY_Pct": 5},
+        ]
+    )
+
+    out = run_quality_score_model(features)
+
+    assert out["Ticker"].tolist() == ["AAA"]
+
