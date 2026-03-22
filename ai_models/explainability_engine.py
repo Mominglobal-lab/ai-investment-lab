@@ -31,6 +31,12 @@ def _safe_json_float(value: object) -> float | None:
     return out
 
 
+def _normalize_tickers(series: pd.Series) -> pd.Series:
+    out = series.astype(str).str.upper().str.strip()
+    out = out.where(~out.isin(["", "NAN", "NONE"]), pd.NA)
+    return out
+
+
 def _component_table(feature_df: pd.DataFrame) -> pd.DataFrame:
     f = feature_df.copy()
     if "Ticker" not in f.columns:
@@ -69,8 +75,23 @@ def build_quality_explanations(feature_df: pd.DataFrame, quality_df: pd.DataFram
         )
 
     q = quality_df.copy()
-    q["Ticker"] = q["Ticker"].astype(str).str.upper().str.strip()
+    q["Ticker"] = _normalize_tickers(q["Ticker"])
+    q = q.dropna(subset=["Ticker"]).reset_index(drop=True)
+    if q.empty:
+        return pd.DataFrame(
+            columns=[
+                "Ticker",
+                "FeatureAsOfDate",
+                "QualityScore",
+                "QualityTier",
+                "TopPositiveDrivers",
+                "TopNegativeDrivers",
+                "ContributionJSON",
+            ]
+        )
     comp = _component_table(feature_df)
+    comp["Ticker"] = _normalize_tickers(comp["Ticker"])
+    comp = comp.dropna(subset=["Ticker"]).reset_index(drop=True)
     merged = q.merge(comp, on="Ticker", how="left")
 
     weights = dict(DEFAULT_WEIGHTS)

@@ -27,6 +27,12 @@ def _percentile_rank(series: pd.Series, higher_is_better: bool = True) -> pd.Ser
     return s.rank(pct=True, method="average").fillna(0.5)
 
 
+def _normalize_tickers(series: pd.Series) -> pd.Series:
+    out = series.astype(str).str.upper().str.strip()
+    out = out.where(~out.isin(["", "NAN", "NONE"]), pd.NA)
+    return out
+
+
 def _score_frame(df: pd.DataFrame) -> pd.DataFrame:
     x = df.copy()
     if "Ticker" not in x.columns:
@@ -78,12 +84,26 @@ def build_quality_uncertainty(
         )
 
     q = quality_df.copy()
-    q["Ticker"] = q["Ticker"].astype(str).str.upper().str.strip()
+    q["Ticker"] = _normalize_tickers(q["Ticker"])
+    q = q.dropna(subset=["Ticker"]).reset_index(drop=True)
+    if q.empty:
+        return pd.DataFrame(
+            columns=[
+                "Ticker",
+                "FeatureAsOfDate",
+                "ScoreMean",
+                "ScoreP10",
+                "ScoreP50",
+                "ScoreP90",
+                "TierMostLikely",
+                "TierStability",
+            ]
+        )
 
     f = feature_df.copy()
     if "Ticker" not in f.columns:
         f = f.reset_index().rename(columns={"index": "Ticker"})
-    f["Ticker"] = f["Ticker"].astype(str).str.upper().str.strip()
+    f["Ticker"] = _normalize_tickers(f["Ticker"])
     f = f.dropna(subset=["Ticker"]).reset_index(drop=True)
     if f.empty:
         out = q.copy()

@@ -58,3 +58,17 @@ def test_quality_explainability_sanitizes_non_finite_json_values():
     contrib = json.loads(row["ContributionJSON"])
     assert isinstance(contrib, dict)
 
+
+def test_quality_explainability_drops_missing_tickers():
+    feature_df = pd.DataFrame([{"Ticker": "AAA", "Revenue_Growth_YoY_Pct": 10}])
+    quality_df = pd.DataFrame(
+        [
+            {"Ticker": None, "QualityScore": 55, "QualityTier": "Neutral"},
+            {"Ticker": "AAA", "QualityScore": 80, "QualityTier": "Strong"},
+        ]
+    )
+
+    out = build_quality_explanations(feature_df, quality_df)
+
+    assert out["Ticker"].tolist() == ["AAA"]
+
