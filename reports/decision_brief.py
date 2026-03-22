@@ -53,8 +53,13 @@ def _to_builtin(value: Any) -> Any:
             return _to_builtin(value.item())
         except Exception:
             pass
+    if isinstance(value, bool):
+        return value
     if isinstance(value, (int, float)):
-        return float(value)
+        out = float(value)
+        if not math.isfinite(out):
+            return None
+        return out
     return value
 
 

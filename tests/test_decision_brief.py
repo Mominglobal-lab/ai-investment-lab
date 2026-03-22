@@ -129,8 +129,11 @@ def test_generate_decision_brief_handles_malformed_summary_and_scenario_values(t
 
     out = generate_decision_brief(simulation_result=sim, output_dir=str(tmp_path), format="html")
     html_text = Path(out["html_path"]).read_text(encoding="utf-8")
+    json_text = Path(out["json_path"]).read_text(encoding="utf-8")
 
     assert Path(out["json_path"]).exists()
     assert Path(out["html_path"]).exists()
     assert "inf" not in html_text.lower()
+    assert "Infinity" not in json_text
+    assert "NaN" not in json_text
 
