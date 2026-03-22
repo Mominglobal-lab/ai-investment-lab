@@ -104,3 +104,17 @@ def test_regime_evidence_does_not_overstate_unconfirmed_conditions():
     assert out["RuleTriggered"].iloc[-1] == "risk_off_label_without_full_confirmation"
     assert "not both confirmed" in out["ShortExplanation"].iloc[-1]
 
+
+def test_risk_evidence_json_sanitizes_non_finite_values():
+    dates = pd.date_range("2025-01-01", periods=3, freq="B")
+    risk_df = pd.DataFrame({"Date": dates, "RiskScore": [10.0, float("inf"), 30.0], "RiskLevel": ["Low", "Low", "Moderate"]})
+
+    out = build_risk_evidence(prices_df=pd.DataFrame(), treasury_df=None, risk_df=risk_df)
+
+    assert not out.empty
+    text = out["EvidencePointsJSON"].iloc[-1]
+    assert "Infinity" not in text
+    assert "NaN" not in text
+    parsed = json.loads(text)
+    assert isinstance(parsed, dict)
+

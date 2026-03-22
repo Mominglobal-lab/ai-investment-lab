@@ -1,9 +1,27 @@
 from __future__ import annotations
 
 import json
+import math
 
 import numpy as np
 import pandas as pd
+
+
+def _json_safe(value):
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, tuple):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        out = float(value)
+        if not math.isfinite(out):
+            return None
+        return out
+    return value
 
 
 def _detect_col(columns: list[str], candidates: list[str]) -> str | None:
@@ -129,7 +147,7 @@ def build_regime_evidence(
                 "RegimeLabel": label,
                 "ConfidenceScore": float(row.get("ConfidenceScore", np.nan)),
                 "RuleTriggered": rule,
-                "EvidencePointsJSON": json.dumps(evidence, sort_keys=True),
+                "EvidencePointsJSON": json.dumps(_json_safe(evidence), sort_keys=True, allow_nan=False),
                 "ShortExplanation": short,
             }
         )
@@ -192,7 +210,7 @@ def build_risk_evidence(prices_df: pd.DataFrame, treasury_df: pd.DataFrame | Non
                 "RiskScore": float(row["RiskScore"]),
                 "RiskLevel": str(row.get("RiskLevel", "Unknown")),
                 "TopRiskDrivers": ", ".join(top),
-                "EvidencePointsJSON": json.dumps(ev, sort_keys=True),
+                "EvidencePointsJSON": json.dumps(_json_safe(ev), sort_keys=True, allow_nan=False),
                 "ShortExplanation": short,
             }
         )

@@ -70,3 +70,31 @@ def test_warning_feature_drift_uses_feature_drift_alert_type():
     assert alerts["AlertType"].iloc[0] == "FeatureDrift"
     assert alerts["Severity"].iloc[0] == "Warning"
 
+
+def test_alert_engine_sanitizes_non_finite_evidence_values():
+    drift_df = pd.DataFrame(
+        [
+            {
+                "Date": pd.Timestamp("2026-01-10"),
+                "MetricName": "Momentum_252d",
+                "MetricType": "Feature",
+                "DriftScore": float("inf"),
+                "DriftLevel": "Severe",
+            }
+        ]
+    )
+
+    alerts = generate_alerts(
+        drift_df=drift_df,
+        regime_df=pd.DataFrame(),
+        risk_df=pd.DataFrame(),
+        coverage_stats={"treasury_exists": True, "prices_rows": 50000, "expected_min_price_rows": 50000},
+    )
+
+    assert len(alerts) == 1
+    text = alerts["EvidenceJSON"].iloc[0]
+    assert "Infinity" not in text
+    assert "NaN" not in text
+    parsed = json.loads(text)
+    assert parsed["DriftScore"] is None
+

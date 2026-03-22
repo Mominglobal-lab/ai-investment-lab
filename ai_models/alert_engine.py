@@ -1,9 +1,27 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 import pandas as pd
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, tuple):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        out = float(value)
+        if not math.isfinite(out):
+            return None
+        return out
+    return value
 
 
 def _normalize_alert_date(value) -> pd.Timestamp:
@@ -31,7 +49,7 @@ def _mk_alert(
         "AlertType": alert_type,
         "Title": title,
         "Description": description,
-        "EvidenceJSON": json.dumps(evidence, sort_keys=True),
+        "EvidenceJSON": json.dumps(_json_safe(evidence), sort_keys=True, allow_nan=False),
         "SuggestedAction": action,
     }
 
