@@ -12,6 +12,14 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        out = float(value)
+    except Exception:
+        return float(default)
+    return out
+
+
 def _to_builtin(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(k): _to_builtin(v) for k, v in value.items()}
@@ -42,7 +50,7 @@ def _derive_insights(simulation_result: dict[str, Any]) -> list[str]:
     holdings = portfolio.get("holdings", []) or []
 
     if holdings:
-        max_w = max(float(h.get("weight", 0.0)) for h in holdings)
+        max_w = max(_safe_float((h or {}).get("weight", 0.0), 0.0) for h in holdings)
         if max_w > 0.35:
             insights.append("Concentration risk is elevated: at least one holding exceeds 35% weight.")
 
@@ -92,7 +100,7 @@ def _html_holdings(holdings: list[dict[str, Any]]) -> str:
     rows = "".join(
         "<tr>"
         f"<td>{html.escape(str(h.get('ticker') or ''))}</td>"
-        f"<td>{float(h.get('weight', 0.0)):.4f}</td>"
+        f"<td>{_safe_float((h or {}).get('weight', 0.0), 0.0):.4f}</td>"
         "</tr>"
         for h in holdings
     )

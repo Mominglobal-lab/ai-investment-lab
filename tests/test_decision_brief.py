@@ -87,3 +87,13 @@ def test_generate_decision_brief_escapes_html_content(tmp_path):
     assert "&lt;b&gt;QQQ&lt;/b&gt;" in html_text
     assert "&lt;img src=x onerror=alert(&quot;x&quot;)&gt;" in html_text
 
+
+def test_generate_decision_brief_handles_non_numeric_holding_weight(tmp_path):
+    sim = _sample_simulation_result()
+    sim["portfolio"]["holdings"][0]["weight"] = "not-a-number"
+
+    out = generate_decision_brief(simulation_result=sim, output_dir=str(tmp_path), format="html")
+    html_text = Path(out["html_path"]).read_text(encoding="utf-8")
+
+    assert "0.0000" in html_text
+
