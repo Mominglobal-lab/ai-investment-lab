@@ -130,6 +130,23 @@ def _upsert_registry_models(registry: dict, entries: list[dict]) -> dict:
     return registry
 
 
+def _treasury_cache_schema_ok(path: str) -> tuple[bool, int]:
+    df, _err = read_parquet_safe(path)
+    if df is None or df.empty:
+        return False, int(len(df) if df is not None else 0)
+
+    cols = list(df.columns)
+    canon = {str(c).lower().replace("_", "").replace(" ", ""): c for c in cols}
+
+    def has_any(candidates: list[str]) -> bool:
+        return any(c.lower().replace("_", "").replace(" ", "") in canon for c in candidates)
+
+    has_date = has_any(["Date", "AsOfDate", "Timestamp"])
+    has_10y = has_any(["10Y", "DGS10", "Yield10Y", "UST10Y"])
+    has_short = has_any(["2Y", "DGS2", "Yield2Y", "UST2Y", "3M", "DGS3MO", "Yield3M", "UST3M"])
+    return bool(has_date and has_10y and has_short), int(len(df))
+
+
 def run_stock_fundamentals_pipeline(
     *,
     cache_path: str = "data/fundamentals_cache.parquet",
@@ -584,11 +601,8 @@ def run_decision_models_pipeline(
 
     fund_status = get_cache_status(fundamentals_path, 365, required_columns=["Ticker"])
     prices_status = get_cache_status(prices_path, 365, required_columns=["Ticker", "Date", "AdjClose"])
-    treasury_status = get_cache_status(treasury_path, 365, required_columns=["Date", "10Y", "2Y", "3M"])
-    treasury_rows = 0
-    treasury_df, _terr = read_parquet_safe(treasury_path)
-    if treasury_df is not None:
-        treasury_rows = int(len(treasury_df))
+    treasury_exists = os.path.exists(treasury_path)
+    treasury_schema_ok, treasury_rows = _treasury_cache_schema_ok(treasury_path)
     health = {
         "generated_at": now,
         "model_freshness": {
@@ -600,8 +614,8 @@ def run_decision_models_pipeline(
             "fundamentals_cache": {"exists": fund_status.exists, "schema_ok": fund_status.schema_ok},
             "prices_cache": {"exists": prices_status.exists, "schema_ok": prices_status.schema_ok},
             "treasury_yields_cache": {
-                "exists": treasury_status.exists,
-                "schema_ok": treasury_status.schema_ok,
+                "exists": treasury_exists,
+                "schema_ok": treasury_schema_ok,
                 "row_count": treasury_rows,
             },
         },
