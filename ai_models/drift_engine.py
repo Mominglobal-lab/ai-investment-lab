@@ -16,6 +16,21 @@ class WindowConfig:
     notes: str
 
 
+def _count_state_changes(series: pd.Series) -> int:
+    s = series.copy()
+    prev = s.shift(1)
+    changed = s.ne(prev)
+    if len(changed) > 0:
+        changed.iloc[0] = False
+    return int(changed.sum())
+
+
+def _state_flip_rate(series: pd.Series) -> float:
+    if len(series) <= 1:
+        return 0.0
+    return float(_count_state_changes(series) / float(len(series) - 1))
+
+
 def _psi_from_arrays(base: np.ndarray, curr: np.ndarray, n_bins: int = 10) -> float:
     base = base[np.isfinite(base)]
     curr = curr[np.isfinite(curr)]
@@ -105,7 +120,7 @@ def compute_signal_instability(
         r = regime_df.copy()
         r["Date"] = pd.to_datetime(r["Date"], errors="coerce")
         r = r.dropna(subset=["Date"]).sort_values("Date").tail(60)
-        flip_rate = float((r["RegimeLabel"] != r["RegimeLabel"].shift(1)).mean()) if len(r) > 1 else 0.0
+        flip_rate = _state_flip_rate(r["RegimeLabel"]) if len(r) > 1 else 0.0
         avg_conf = float(pd.to_numeric(r.get("ConfidenceScore"), errors="coerce").mean()) if "ConfidenceScore" in r.columns else np.nan
         score = flip_rate
         rows.append(
@@ -131,7 +146,7 @@ def compute_signal_instability(
         score_vol = float(k["RiskScore"].std(ddof=1)) if len(k) > 1 else 0.0
         level_changes = 0
         if "RiskLevel" in k.columns:
-            level_changes = int((k["RiskLevel"] != k["RiskLevel"].shift(1)).sum())
+            level_changes = _count_state_changes(k["RiskLevel"])
         whipsaw = level_changes > 4
         rows.append(
             {

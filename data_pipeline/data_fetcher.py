@@ -679,7 +679,7 @@ def refresh_prices_yfinance(tickers: list[str], lookback_years: int = 5) -> Pric
             errors_sample=[],
         )
 
-    period_years = max(int(lookback_years), 5)
+    period_years = max(int(lookback_years), 1)
     rows: list[dict[str, object]] = []
     errors_sample: list[str] = []
     success_count = 0

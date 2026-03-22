@@ -36,6 +36,15 @@ def _mk_alert(
     }
 
 
+def _count_state_changes(series: pd.Series) -> int:
+    s = series.copy()
+    prev = s.shift(1)
+    changed = s.ne(prev)
+    if len(changed) > 0:
+        changed.iloc[0] = False
+    return int(changed.sum())
+
+
 def generate_alerts(
     drift_df: pd.DataFrame,
     regime_df: pd.DataFrame | None,
@@ -80,7 +89,7 @@ def generate_alerts(
         recent["Date"] = pd.to_datetime(recent["Date"], errors="coerce")
         recent = recent.dropna(subset=["Date"]).sort_values("Date").tail(60)
         if len(recent) > 2:
-            flips = int((recent["RegimeLabel"] != recent["RegimeLabel"].shift(1)).sum())
+            flips = _count_state_changes(recent["RegimeLabel"])
             if flips > 8:
                 alerts.append(
                     _mk_alert(
@@ -115,7 +124,7 @@ def generate_alerts(
                     )
                 )
             if "RiskLevel" in recent.columns:
-                changes = int((recent["RiskLevel"] != recent["RiskLevel"].shift(1)).sum())
+                changes = _count_state_changes(recent["RiskLevel"])
                 if changes > 4:
                     alerts.append(
                         _mk_alert(

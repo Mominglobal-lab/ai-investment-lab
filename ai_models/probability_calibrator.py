@@ -4,6 +4,14 @@ import numpy as np
 import pandas as pd
 
 
+def _same_as_previous(series: pd.Series) -> pd.Series:
+    prev = series.shift(1)
+    same = series.eq(prev)
+    if len(same) > 0:
+        same.iloc[0] = True
+    return same
+
+
 def build_regime_probabilities(regime_df: pd.DataFrame, window: int = 20) -> pd.DataFrame:
     if regime_df is None or regime_df.empty:
         return pd.DataFrame(
@@ -27,8 +35,8 @@ def build_regime_probabilities(regime_df: pd.DataFrame, window: int = 20) -> pd.
     r = r.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
 
     out_rows: list[dict[str, object]] = []
-    changed = r["RegimeLabel"].eq(r["RegimeLabel"].shift(1))
-    stable_roll = changed.rolling(int(window), min_periods=1).mean().fillna(1.0)
+    same_as_previous = _same_as_previous(r["RegimeLabel"])
+    stable_roll = same_as_previous.rolling(int(window), min_periods=1).mean().fillna(1.0)
 
     for i, row in r.iterrows():
         label = str(row["RegimeLabel"])

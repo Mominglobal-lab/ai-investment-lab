@@ -49,3 +49,18 @@ def test_missing_regime_labels_default_to_neutral():
     assert (out["P_Neutral"] > out["P_RiskOn"]).all()
     assert (out["P_Neutral"] > out["P_RiskOff"]).all()
 
+
+def test_initial_regime_stability_starts_at_one_for_constant_series():
+    dates = pd.date_range("2025-01-01", periods=3, freq="B")
+    df = pd.DataFrame(
+        {
+            "Date": dates,
+            "RegimeLabel": ["Neutral", "Neutral", "Neutral"],
+            "ConfidenceScore": [0.6, 0.6, 0.6],
+        }
+    )
+
+    out = build_regime_probabilities(df, window=3)
+
+    assert float(out["RegimeStability_20d"].iloc[0]) == 1.0
+
