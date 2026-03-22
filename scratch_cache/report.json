@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "finite": 1.25,
+  "nan_value": null,
+  "inf_value": null,
+  "nested": {
+    "neg_inf": null
+  },
+  "items": [
+    1.0,
+    null,
+    false
+  ]
+}

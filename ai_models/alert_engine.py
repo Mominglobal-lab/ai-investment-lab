@@ -104,7 +104,8 @@ def generate_alerts(
 
     if drift_df is not None and not drift_df.empty:
         for _, r in drift_df.iterrows():
-            score = _safe_float(r.get("DriftScore", 0.0))
+            raw_score = r.get("DriftScore", 0.0)
+            score = _safe_float(raw_score)
             name = str(r.get("MetricName", "UnknownMetric"))
             level = _normalize_drift_level(r.get("DriftLevel", "Stable"))
             if level == "Severe":
@@ -115,7 +116,7 @@ def generate_alerts(
                         alert_type="SevereFeatureDrift" if str(r.get("MetricType")) == "Feature" else "SignalInstability",
                         title=f"Severe drift detected: {name}",
                         description=f"{name} drift score is {score:.3f}, exceeding severe threshold.",
-                        evidence={"MetricName": name, "DriftScore": score, "DriftLevel": level},
+                        evidence={"MetricName": name, "DriftScore": _json_safe(raw_score), "DriftLevel": level},
                         action="Review feature coverage and retrain/recalibrate affected models if persistent.",
                     )
                 )
@@ -127,7 +128,7 @@ def generate_alerts(
                         alert_type="SignalInstability" if str(r.get("MetricType")) == "Signal" else "FeatureDrift",
                         title=f"Drift warning: {name}",
                         description=f"{name} drift score is {score:.3f}, above drift threshold.",
-                        evidence={"MetricName": name, "DriftScore": score, "DriftLevel": level},
+                        evidence={"MetricName": name, "DriftScore": _json_safe(raw_score), "DriftLevel": level},
                         action="Monitor trend and validate model robustness over next refresh cycles.",
                     )
                 )

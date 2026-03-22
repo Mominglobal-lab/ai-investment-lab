@@ -1,0 +1,46 @@
+{
+  "metadata": {
+    "run_timestamp": "2026-03-05T15:00:00+00:00",
+    "period_start": "2021-03-05",
+    "period_end": "2026-03-05",
+    "rebalance_rule": "monthly",
+    "benchmark_ticker": "SPY",
+    "simulation_mode": "monte_carlo",
+    "run_id": "20260305T150000Z_0c2d019e97",
+    "export_timestamp": "2026-03-22T23:52:10.199766+00:00",
+    "title": "Portfolio Decision Brief"
+  },
+  "portfolio": {
+    "holdings": [
+      {
+        "ticker": "AAPL",
+        "weight": null
+      },
+      {
+        "ticker": "MSFT",
+        "weight": 0.3
+      }
+    ],
+    "weighting_mode": "Market cap weight"
+  },
+  "summary": {
+    "beta_relative_to_benchmark": "not-a-number",
+    "correlation_with_benchmark": null,
+    "VaR_95": "bad-var",
+    "max_drawdown": -0.28
+  },
+  "scenario": {
+    "ending_value_percentiles": {
+      "p50": null
+    },
+    "max_drawdown_percentiles": {},
+    "probability_of_loss": "bad-probability"
+  },
+  "decision_insights": [
+    "Drawdown severity: moderate (max drawdown between -20% and -35%)."
+  ],
+  "files": {
+    "json": "20260305T150000Z_0c2d019e97/decision_brief.json",
+    "html": "20260305T150000Z_0c2d019e97/decision_brief.html"
+  }
+}

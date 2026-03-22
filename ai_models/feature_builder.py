@@ -10,6 +10,7 @@ import pandas as pd
 FUNDAMENTALS_PATH = "data/fundamentals_cache.parquet"
 PRICES_PATH = "data/prices_cache.parquet"
 TREASURY_PATH = "data/treasury_yields_cache.parquet"
+FUNDAMENTALS_FEATURE_COLUMNS = ["Ticker", "Revenue_Growth_YoY_Pct", "EBITDA_Margin", "ROE", "FreeCashFlow_Margin"]
 
 
 @dataclass(frozen=True)
@@ -46,9 +47,9 @@ def _load_fundamentals(fundamentals_path: str) -> tuple[pd.DataFrame, list[str]]
                 df = pd.concat(frames, axis=0, ignore_index=True)
                 warnings.append("Primary fundamentals cache missing; used segmented fundamentals caches.")
             else:
-                return pd.DataFrame(), ["Fundamentals cache not found or empty."]
+                return pd.DataFrame(columns=FUNDAMENTALS_FEATURE_COLUMNS), ["Fundamentals cache not found or empty."]
         else:
-            return pd.DataFrame(), [f"Fundamentals cache not found or empty: {fundamentals_path}"]
+            return pd.DataFrame(columns=FUNDAMENTALS_FEATURE_COLUMNS), [f"Fundamentals cache not found or empty: {fundamentals_path}"]
 
     out = df.copy()
     if "Ticker" not in out.columns:
@@ -61,8 +62,7 @@ def _load_fundamentals(fundamentals_path: str) -> tuple[pd.DataFrame, list[str]]
         out[c] = pd.to_numeric(out[c], errors="coerce")
 
     # Conservative fallback: if explicit FCF margin is absent, keep NaN and impute later in model.
-    cols = ["Ticker", "Revenue_Growth_YoY_Pct", "EBITDA_Margin", "ROE", "FreeCashFlow_Margin"]
-    out = out[cols].dropna(subset=["Ticker"]).drop_duplicates(subset=["Ticker"], keep="last")
+    out = out[FUNDAMENTALS_FEATURE_COLUMNS].dropna(subset=["Ticker"]).drop_duplicates(subset=["Ticker"], keep="last")
     return out, warnings
 
 

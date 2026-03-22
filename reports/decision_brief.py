@@ -31,7 +31,7 @@ def _format_six_decimals(value: Any) -> str | Any:
     num = _safe_metric(value)
     if math.isfinite(num):
         return f"{num:.6f}"
-    return value
+    return "0.000000"
 
 
 def _safe_run_datetime(value: Any) -> datetime:
@@ -228,7 +228,7 @@ def generate_decision_brief(
 
     json_path = run_dir / "decision_brief.json"
     html_path = run_dir / "decision_brief.html"
-    json_path.write_text(json.dumps(brief, indent=2, sort_keys=False), encoding="utf-8")
+    json_path.write_text(json.dumps(brief, indent=2, sort_keys=False, allow_nan=False), encoding="utf-8")
 
     used_artifacts = [
         "data/prices_cache.parquet",
@@ -258,7 +258,7 @@ def generate_decision_brief(
     artifacts_html = "".join(f"<li>{html.escape(str(a))}</li>" for a in used_artifacts)
     safe_title = html.escape(str(title))
 
-    html = f"""<!doctype html>
+    html_doc = f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -285,7 +285,7 @@ ul {{ margin: 8px 0 0 18px; }}
 </body>
 </html>
 """
-    html_path.write_text(html, encoding="utf-8")
+    html_path.write_text(html_doc, encoding="utf-8")
 
     return {
         "run_id": run_id,

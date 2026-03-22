@@ -1,0 +1,12 @@
+{
+  "run_timestamp": "2026-03-22T23:52:33.833869+00:00",
+  "tickers_requested": 4.0,
+  "tickers_successfully_fetched": 0.0,
+  "tickers_failed": 4.0,
+  "period_start": null,
+  "period_end": null,
+  "cache_timestamp": "2026-03-22T23:52:33.833939+00:00",
+  "wrote_cache": false,
+  "reason": "no rows returned from refresh",
+  "errors_sample": []
+}

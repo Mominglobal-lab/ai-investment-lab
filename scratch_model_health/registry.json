@@ -1,0 +1,58 @@
+{
+  "generated_at": "2026-03-22T23:52:33.845446+00:00",
+  "models": [
+    {
+      "model_name": "quality_score_model",
+      "model_version": "1.0.0",
+      "feature_set_used": [
+        "Revenue_Growth_YoY_Pct",
+        "EBITDA_Margin",
+        "ROE",
+        "FreeCashFlow_Margin",
+        "Volatility_63D",
+        "Drawdown_252D"
+      ],
+      "training_or_evaluation_window": "cross-sectional latest snapshot",
+      "timestamp": "2026-03-22T23:52:33.845446+00:00",
+      "evaluation_summary": {
+        "rows_scored": 1.0,
+        "score_min": 80.0,
+        "score_max": 80.0
+      }
+    },
+    {
+      "model_name": "regime_detection_model",
+      "model_version": "1.0.0",
+      "feature_set_used": [
+        "YieldSlope",
+        "YieldInverted",
+        "YieldVolatility",
+        "Benchmark_Volatility",
+        "Benchmark_Trend"
+      ],
+      "training_or_evaluation_window": "daily rule-based regime classification",
+      "timestamp": "2026-03-22T23:52:33.845446+00:00",
+      "evaluation_summary": {
+        "rows_scored": 1.0,
+        "latest_regime": "Risk On"
+      }
+    },
+    {
+      "model_name": "risk_detector",
+      "model_version": "1.0.0",
+      "feature_set_used": [
+        "volatility_expansion",
+        "drawdown_acceleration",
+        "correlation_spike",
+        "yield_inversion",
+        "rate_shock"
+      ],
+      "training_or_evaluation_window": "daily rule-based systemic risk scoring",
+      "timestamp": "2026-03-22T23:52:33.845446+00:00",
+      "evaluation_summary": {
+        "rows_scored": 1.0,
+        "latest_risk_level": "Low"
+      }
+    }
+  ]
+}

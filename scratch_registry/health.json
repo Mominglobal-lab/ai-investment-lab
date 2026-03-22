@@ -1,0 +1,25 @@
+{
+  "generated_at": "2026-03-22T23:52:33.806484+00:00",
+  "model_freshness": {
+    "quality_scores_cache": "missing",
+    "regime_cache": "missing",
+    "risk_signals_cache": "missing"
+  },
+  "input_cache_coverage": {
+    "fundamentals_cache": {
+      "exists": false,
+      "schema_ok": false
+    },
+    "prices_cache": {
+      "exists": false,
+      "schema_ok": false
+    },
+    "treasury_yields_cache": {
+      "exists": true,
+      "schema_ok": false,
+      "row_count": 0.0
+    }
+  },
+  "missing_data_warnings": [],
+  "feature_availability_indicators": {}
+}
