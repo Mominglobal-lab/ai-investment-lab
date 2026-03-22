@@ -162,7 +162,10 @@ def _compute_summary_metrics(
     if benchmark_returns is not None and not benchmark_returns.empty:
         aligned = pd.concat([portfolio_returns.rename("p"), benchmark_returns.rename("b")], axis=1).dropna()
         if len(aligned) >= 2:
-            corr = float(aligned["p"].corr(aligned["b"]))
+            p_std = float(aligned["p"].std(ddof=1))
+            b_std = float(aligned["b"].std(ddof=1))
+            if p_std > 0 and b_std > 0:
+                corr = float(aligned["p"].corr(aligned["b"]))
             bvar = float(aligned["b"].var(ddof=1))
             if bvar > 0:
                 beta = float(aligned["p"].cov(aligned["b"]) / bvar)
