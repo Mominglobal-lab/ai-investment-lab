@@ -97,3 +97,24 @@ def test_generate_decision_brief_handles_non_numeric_holding_weight(tmp_path):
 
     assert "0.0000" in html_text
 
+
+def test_generate_decision_brief_handles_invalid_run_timestamp(tmp_path):
+    sim = _sample_simulation_result()
+    sim["metadata"]["run_timestamp"] = "not-a-timestamp"
+
+    out = generate_decision_brief(simulation_result=sim, output_dir=str(tmp_path), format="html")
+
+    assert Path(out["json_path"]).exists()
+    assert Path(out["html_path"]).exists()
+
+
+def test_generate_decision_brief_sanitizes_infinite_holding_weight(tmp_path):
+    sim = _sample_simulation_result()
+    sim["portfolio"]["holdings"][0]["weight"] = float("inf")
+
+    out = generate_decision_brief(simulation_result=sim, output_dir=str(tmp_path), format="html")
+    html_text = Path(out["html_path"]).read_text(encoding="utf-8")
+
+    assert "inf" not in html_text.lower()
+    assert "0.0000" in html_text
+

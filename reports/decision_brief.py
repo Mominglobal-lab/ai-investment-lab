@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import hashlib
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,16 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         out = float(value)
     except Exception:
         return float(default)
+    if not math.isfinite(out):
+        return float(default)
     return out
+
+
+def _safe_run_datetime(value: Any) -> datetime:
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        return datetime.now(timezone.utc)
 
 
 def _to_builtin(value: Any) -> Any:
@@ -178,7 +188,7 @@ def generate_decision_brief(
     }
     run_hash = _hash_payload(run_seed)
     run_ts = metadata.get("run_timestamp") or _now_iso()
-    run_dt = datetime.fromisoformat(str(run_ts).replace("Z", "+00:00"))
+    run_dt = _safe_run_datetime(run_ts)
     run_id = f"{run_dt.strftime('%Y%m%dT%H%M%SZ')}_{run_hash}"
 
     export_ts = _now_iso()

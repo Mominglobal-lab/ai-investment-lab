@@ -92,6 +92,21 @@ def test_missing_ticker_handling(monkeypatch):
         simulate_portfolio([("AAA", 0.6), ("MISSING", 0.4)], strict=True)
 
 
+def test_infinite_weight_is_rejected(monkeypatch):
+    prices = _make_prices(
+        [
+            ("AAA", "2025-01-01", 100),
+            ("AAA", "2025-01-02", 101),
+            ("SPY", "2025-01-01", 100),
+            ("SPY", "2025-01-02", 100),
+        ]
+    )
+    monkeypatch.setattr(pd, "read_parquet", lambda *_args, **_kwargs: prices.copy())
+
+    with pytest.raises(ValueError):
+        simulate_portfolio([("AAA", float("inf"))], strict=True)
+
+
 def test_monthly_rebalance_logic(monkeypatch):
     prices = _make_prices(
         [

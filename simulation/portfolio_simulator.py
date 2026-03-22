@@ -30,7 +30,7 @@ def _as_float(value: object, default: float = float("nan")) -> float:
         out = float(value)
     except Exception:
         return float(default)
-    if np.isnan(out):
+    if not np.isfinite(out):
         return float(default)
     return out
 
