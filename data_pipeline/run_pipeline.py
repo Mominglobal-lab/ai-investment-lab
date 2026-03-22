@@ -101,6 +101,35 @@ class MonitoringPipelineRunResult:
     reason: str
 
 
+def _load_model_registry(path: str, now: str) -> dict:
+    try:
+        import json
+
+        with open(path, "r", encoding="utf-8") as f:
+            registry = json.load(f)
+    except Exception:
+        registry = {"generated_at": now, "models": []}
+    registry.setdefault("models", [])
+    registry["generated_at"] = now
+    return registry
+
+
+def _upsert_registry_models(registry: dict, entries: list[dict]) -> dict:
+    existing = [m for m in registry.get("models", []) if isinstance(m, dict)]
+    by_name = {
+        str(m.get("model_name")): m
+        for m in existing
+        if str(m.get("model_name") or "").strip()
+    }
+    for entry in entries:
+        name = str(entry.get("model_name") or "").strip()
+        if not name:
+            continue
+        by_name[name] = entry
+    registry["models"] = list(by_name.values())
+    return registry
+
+
 def run_stock_fundamentals_pipeline(
     *,
     cache_path: str = "data/fundamentals_cache.parquet",
@@ -468,6 +497,7 @@ def run_decision_models_pipeline(
         fundamentals_path=fundamentals_path,
         prices_path=prices_path,
         treasury_path=treasury_path,
+        benchmark_ticker=benchmark_ticker,
     )
     features = feature_result.features.reset_index()
 
@@ -491,9 +521,10 @@ def run_decision_models_pipeline(
     save_parquet_atomic(risk, risk_out_path)
 
     now = pd.Timestamp.utcnow().isoformat()
-    registry = {
-        "generated_at": now,
-        "models": [
+    registry = _load_model_registry(model_registry_path, now)
+    registry = _upsert_registry_models(
+        registry,
+        [
             {
                 "model_name": "quality_score_model",
                 "model_version": "1.0.0",
@@ -548,7 +579,7 @@ def run_decision_models_pipeline(
                 },
             },
         ],
-    }
+    )
     write_json_report(registry, model_registry_path)
 
     fund_status = get_cache_status(fundamentals_path, 365, required_columns=["Ticker"])
@@ -640,33 +671,27 @@ def run_explainability_pipeline(
 
     # Update registry and health with explanation artifact entries.
     now = pd.Timestamp.utcnow().isoformat()
-    registry: dict = {}
-    try:
-        import json
-
-        with open(model_registry_path, "r", encoding="utf-8") as f:
-            registry = json.load(f)
-    except Exception:
-        registry = {"generated_at": now, "models": []}
-    registry.setdefault("models", [])
-    registry["generated_at"] = now
-    registry["models"].append(
-        {
-            "model_name": "explainability_layer",
-            "model_version": "1.0.0",
-            "feature_set_used": [
-                "quality component percentiles",
-                "yield curve and benchmark regime indicators",
-                "systemic risk indicator decomposition",
-            ],
-            "training_or_evaluation_window": "latest cached artifacts",
-            "timestamp": now,
-            "evaluation_summary": {
-                "quality_explanations_rows": int(len(quality_explain)),
-                "regime_evidence_rows": int(len(regime_evidence)),
-                "risk_evidence_rows": int(len(risk_evidence)),
-            },
-        }
+    registry = _load_model_registry(model_registry_path, now)
+    registry = _upsert_registry_models(
+        registry,
+        [
+            {
+                "model_name": "explainability_layer",
+                "model_version": "1.0.0",
+                "feature_set_used": [
+                    "quality component percentiles",
+                    "yield curve and benchmark regime indicators",
+                    "systemic risk indicator decomposition",
+                ],
+                "training_or_evaluation_window": "latest cached artifacts",
+                "timestamp": now,
+                "evaluation_summary": {
+                    "quality_explanations_rows": int(len(quality_explain)),
+                    "regime_evidence_rows": int(len(regime_evidence)),
+                    "risk_evidence_rows": int(len(risk_evidence)),
+                },
+            }
+        ],
     )
     write_json_report(registry, model_registry_path)
 
@@ -739,33 +764,27 @@ def run_uncertainty_pipeline(
     save_parquet_atomic(k_unc, risk_uncertainty_path)
 
     now = pd.Timestamp.utcnow().isoformat()
-    registry: dict = {}
-    try:
-        import json
-
-        with open(model_registry_path, "r", encoding="utf-8") as f:
-            registry = json.load(f)
-    except Exception:
-        registry = {"generated_at": now, "models": []}
-    registry.setdefault("models", [])
-    registry["generated_at"] = now
-    registry["models"].append(
-        {
-            "model_name": "uncertainty_layer",
-            "model_version": "1.0.0",
-            "feature_set_used": [
-                "quality bootstrap score bands",
-                "regime confidence-to-probability mapping",
-                "risk rolling movement bands",
-            ],
-            "training_or_evaluation_window": "latest cached artifacts",
-            "timestamp": now,
-            "evaluation_summary": {
-                "quality_uncertainty_rows": int(len(q_unc)),
-                "regime_probabilities_rows": int(len(r_prob)),
-                "risk_uncertainty_rows": int(len(k_unc)),
-            },
-        }
+    registry = _load_model_registry(model_registry_path, now)
+    registry = _upsert_registry_models(
+        registry,
+        [
+            {
+                "model_name": "uncertainty_layer",
+                "model_version": "1.0.0",
+                "feature_set_used": [
+                    "quality bootstrap score bands",
+                    "regime confidence-to-probability mapping",
+                    "risk rolling movement bands",
+                ],
+                "training_or_evaluation_window": "latest cached artifacts",
+                "timestamp": now,
+                "evaluation_summary": {
+                    "quality_uncertainty_rows": int(len(q_unc)),
+                    "regime_probabilities_rows": int(len(r_prob)),
+                    "risk_uncertainty_rows": int(len(k_unc)),
+                },
+            }
+        ],
     )
     write_json_report(registry, model_registry_path)
 
@@ -1040,27 +1059,22 @@ def run_monitoring_pipeline(
 
     # update registry / model health
     now = pd.Timestamp.utcnow().isoformat()
-    try:
-        import json
-
-        with open(model_registry_path, "r", encoding="utf-8") as f:
-            registry = json.load(f)
-    except Exception:
-        registry = {"generated_at": now, "models": []}
-    registry.setdefault("models", [])
-    registry["generated_at"] = now
-    registry["models"].append(
-        {
-            "model_name": "monitoring_layer",
-            "model_version": "1.0.0",
-            "feature_set_used": ["PSI feature drift", "regime/risk instability metrics", "rule-based alerts"],
-            "training_or_evaluation_window": "rolling baseline/current windows",
-            "timestamp": now,
-            "evaluation_summary": {
-                "drift_rows": int(len(drift_df)),
-                "alerts_rows": int(len(alerts_df)),
-            },
-        }
+    registry = _load_model_registry(model_registry_path, now)
+    registry = _upsert_registry_models(
+        registry,
+        [
+            {
+                "model_name": "monitoring_layer",
+                "model_version": "1.0.0",
+                "feature_set_used": ["PSI feature drift", "regime/risk instability metrics", "rule-based alerts"],
+                "training_or_evaluation_window": "rolling baseline/current windows",
+                "timestamp": now,
+                "evaluation_summary": {
+                    "drift_rows": int(len(drift_df)),
+                    "alerts_rows": int(len(alerts_df)),
+                },
+            }
+        ],
     )
     write_json_report(registry, model_registry_path)
 

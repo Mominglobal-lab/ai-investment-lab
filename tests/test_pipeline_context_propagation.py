@@ -81,3 +81,36 @@ def test_uncertainty_pipeline_passes_custom_context(monkeypatch):
     assert captured["prices_path"] == "custom_prices.parquet"
     assert captured["treasury_path"] == "custom_treasury.parquet"
     assert captured["benchmark_ticker"] == "QQQ"
+
+
+def test_model_pipeline_passes_custom_benchmark_context(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _fake_build_feature_table(**kwargs):
+        captured.update(kwargs)
+        return FeatureBuildResult(
+            features=pd.DataFrame([{"Ticker": "AAPL", "QualityScore": 80.0}]).set_index("Ticker"),
+            warnings=[],
+            input_coverage={},
+        )
+
+    monkeypatch.setattr(rp, "build_feature_table", _fake_build_feature_table)
+    monkeypatch.setattr(rp, "run_quality_score_model", lambda features: pd.DataFrame([{"Ticker": "AAPL", "QualityScore": 80.0}]))
+    monkeypatch.setattr(rp, "run_regime_detection_model", lambda **kwargs: pd.DataFrame([{"Date": "2025-01-02", "RegimeLabel": "Risk On"}]))
+    monkeypatch.setattr(rp, "run_systemic_risk_detector", lambda **kwargs: pd.DataFrame([{"Date": "2025-01-02", "RiskLevel": "Low", "RiskScore": 20.0}]))
+    monkeypatch.setattr(rp, "save_parquet_atomic", lambda df, path: None)
+    monkeypatch.setattr(rp, "write_json_report", lambda payload, path: None)
+    monkeypatch.setattr(rp, "get_cache_status", lambda path, max_age_days, required_columns=None: type("S", (), {"exists": False, "schema_ok": False, "is_fresh": False})())
+    monkeypatch.setattr(rp, "read_parquet_safe", lambda path: (pd.DataFrame(), None))
+
+    rp.run_decision_models_pipeline(
+        fundamentals_path="custom_fundamentals.parquet",
+        prices_path="custom_prices.parquet",
+        treasury_path="custom_treasury.parquet",
+        benchmark_ticker="QQQ",
+    )
+
+    assert captured["fundamentals_path"] == "custom_fundamentals.parquet"
+    assert captured["prices_path"] == "custom_prices.parquet"
+    assert captured["treasury_path"] == "custom_treasury.parquet"
+    assert captured["benchmark_ticker"] == "QQQ"
