@@ -23,6 +23,17 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
     return out
 
 
+def _safe_metric(value: Any) -> float:
+    return _safe_float(value, default=float("nan"))
+
+
+def _format_six_decimals(value: Any) -> str | Any:
+    num = _safe_metric(value)
+    if math.isfinite(num):
+        return f"{num:.6f}"
+    return value
+
+
 def _safe_run_datetime(value: Any) -> datetime:
     try:
         return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
@@ -64,12 +75,12 @@ def _derive_insights(simulation_result: dict[str, Any]) -> list[str]:
         if max_w > 0.35:
             insights.append("Concentration risk is elevated: at least one holding exceeds 35% weight.")
 
-    beta = float(summary.get("beta_relative_to_benchmark", float("nan")))
-    if beta == beta and beta > 1.2:
+    beta = _safe_metric(summary.get("beta_relative_to_benchmark", float("nan")))
+    if math.isfinite(beta) and beta > 1.2:
         insights.append("High beta warning: portfolio beta is above 1.2 and may amplify benchmark moves.")
 
-    mdd = float(summary.get("max_drawdown", float("nan")))
-    if mdd == mdd:
+    mdd = _safe_metric(summary.get("max_drawdown", float("nan")))
+    if math.isfinite(mdd):
         if mdd <= -0.35:
             insights.append("Drawdown severity: severe (max drawdown worse than -35%).")
         elif mdd <= -0.20:
@@ -77,13 +88,13 @@ def _derive_insights(simulation_result: dict[str, Any]) -> list[str]:
         else:
             insights.append("Drawdown severity: contained (max drawdown better than -20%).")
 
-    corr = float(summary.get("correlation_with_benchmark", float("nan")))
-    if corr == corr and corr > 0.85:
+    corr = _safe_metric(summary.get("correlation_with_benchmark", float("nan")))
+    if math.isfinite(corr) and corr > 0.85:
         insights.append("Benchmark dependence is high: correlation with benchmark exceeds 0.85.")
 
     if scenario:
-        p_loss = float(scenario.get("probability_of_loss", float("nan")))
-        if p_loss == p_loss and p_loss > 0.30:
+        p_loss = _safe_metric(scenario.get("probability_of_loss", float("nan")))
+        if math.isfinite(p_loss) and p_loss > 0.30:
             insights.append("Downside probability alert: Monte Carlo probability of loss exceeds 30%.")
 
     if not insights:
@@ -139,10 +150,7 @@ def _html_metrics(summary: dict[str, Any]) -> str:
     for k in preferred:
         if k in summary:
             v = summary.get(k)
-            if isinstance(v, (int, float)):
-                pairs.append((k, f"{float(v):.6f}"))
-            else:
-                pairs.append((k, v))
+            pairs.append((k, _format_six_decimals(v) if isinstance(v, (int, float, str)) else v))
     return _html_table_from_pairs(pairs)
 
 
@@ -161,7 +169,7 @@ def _html_scenario(scenario: dict[str, Any] | None) -> str:
         ("Max Drawdown p95", dd.get("p95")),
         ("Probability of Loss", p_loss),
     ]
-    return _html_table_from_pairs([(k, f"{float(v):.6f}" if isinstance(v, (int, float)) else v) for k, v in rows])
+    return _html_table_from_pairs([(k, _format_six_decimals(v) if isinstance(v, (int, float, str)) else v) for k, v in rows])
 
 
 def generate_decision_brief(
@@ -240,7 +248,7 @@ def generate_decision_brief(
         ("Worst Day", summary.get("worst_day")),
         ("Worst Month", summary.get("worst_month")),
     ]
-    risk_pairs_fmt = [(k, f"{float(v):.6f}" if isinstance(v, (int, float)) else v) for k, v in risk_pairs]
+    risk_pairs_fmt = [(k, _format_six_decimals(v) if isinstance(v, (int, float, str)) else v) for k, v in risk_pairs]
     insights_html = "".join(f"<li>{html.escape(str(x))}</li>" for x in insights)
     artifacts_html = "".join(f"<li>{html.escape(str(a))}</li>" for a in used_artifacts)
     safe_title = html.escape(str(title))

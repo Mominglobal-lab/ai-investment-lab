@@ -118,3 +118,19 @@ def test_generate_decision_brief_sanitizes_infinite_holding_weight(tmp_path):
     assert "inf" not in html_text.lower()
     assert "0.0000" in html_text
 
+
+def test_generate_decision_brief_handles_malformed_summary_and_scenario_values(tmp_path):
+    sim = _sample_simulation_result()
+    sim["summary"]["beta_relative_to_benchmark"] = "not-a-number"
+    sim["summary"]["correlation_with_benchmark"] = float("inf")
+    sim["summary"]["VaR_95"] = "bad-var"
+    sim["scenario_results"]["probability_of_loss"] = "bad-probability"
+    sim["scenario_results"]["ending_value_percentiles"]["p50"] = float("inf")
+
+    out = generate_decision_brief(simulation_result=sim, output_dir=str(tmp_path), format="html")
+    html_text = Path(out["html_path"]).read_text(encoding="utf-8")
+
+    assert Path(out["json_path"]).exists()
+    assert Path(out["html_path"]).exists()
+    assert "inf" not in html_text.lower()
+
