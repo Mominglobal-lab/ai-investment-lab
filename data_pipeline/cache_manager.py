@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from dataclasses import dataclass
@@ -86,8 +87,29 @@ def get_cache_status(
 
 
 def write_json_report(report: Dict[str, Any], path: str) -> None:
+    def _sanitize(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {str(k): _sanitize(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [_sanitize(v) for v in value]
+        if isinstance(value, tuple):
+            return [_sanitize(v) for v in value]
+        if hasattr(value, "item"):
+            try:
+                return _sanitize(value.item())
+            except Exception:
+                pass
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            out = float(value)
+            if not math.isfinite(out):
+                return None
+            return out
+        return value
+
     ensure_parent_dir(path)
     tmp_path = f"{path}.tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2, sort_keys=False)
+        json.dump(_sanitize(report), f, indent=2, sort_keys=False, allow_nan=False)
     os.replace(tmp_path, path)
