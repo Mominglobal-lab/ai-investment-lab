@@ -43,3 +43,18 @@ def test_quality_score_normalization_and_tiers():
     assert set(out["QualityTier"].unique()).issubset({"Strong", "Neutral", "Weak"})
     assert len(out["Explanation"].iloc[0]) > 0
 
+
+def test_quality_score_handles_missing_feature_columns():
+    features = pd.DataFrame(
+        [
+            {"Ticker": "AAA", "Revenue_Growth_YoY_Pct": 10},
+            {"Ticker": "BBB", "Revenue_Growth_YoY_Pct": 5},
+        ]
+    )
+
+    out = run_quality_score_model(features)
+
+    assert len(out) == 2
+    assert out["QualityScore"].between(0, 100).all()
+    assert set(out["QualityTier"].unique()).issubset({"Strong", "Neutral", "Weak"})
+

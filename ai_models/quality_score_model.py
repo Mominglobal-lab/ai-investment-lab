@@ -51,13 +51,18 @@ def run_quality_score_model(
     if "Ticker" not in df.columns:
         raise ValueError("features must include Ticker column or index")
 
+    def _col(name: str) -> pd.Series:
+        if name in df.columns:
+            return df[name]
+        return pd.Series(np.nan, index=df.index)
+
     components = pd.DataFrame(index=df.index)
-    components["Revenue_Growth_YoY_Pct"] = _percentile_rank(df.get("Revenue_Growth_YoY_Pct"), higher_is_better=True)
-    components["EBITDA_Margin"] = _percentile_rank(df.get("EBITDA_Margin"), higher_is_better=True)
-    components["ROE"] = _percentile_rank(df.get("ROE"), higher_is_better=True)
-    components["FreeCashFlow_Margin"] = _percentile_rank(df.get("FreeCashFlow_Margin"), higher_is_better=True)
-    components["Volatility_63D_stability"] = _percentile_rank(df.get("Volatility_63D"), higher_is_better=False)
-    components["Drawdown_252D_stability"] = _percentile_rank(df.get("Drawdown_252D").abs(), higher_is_better=False)
+    components["Revenue_Growth_YoY_Pct"] = _percentile_rank(_col("Revenue_Growth_YoY_Pct"), higher_is_better=True)
+    components["EBITDA_Margin"] = _percentile_rank(_col("EBITDA_Margin"), higher_is_better=True)
+    components["ROE"] = _percentile_rank(_col("ROE"), higher_is_better=True)
+    components["FreeCashFlow_Margin"] = _percentile_rank(_col("FreeCashFlow_Margin"), higher_is_better=True)
+    components["Volatility_63D_stability"] = _percentile_rank(_col("Volatility_63D"), higher_is_better=False)
+    components["Drawdown_252D_stability"] = _percentile_rank(_col("Drawdown_252D").abs(), higher_is_better=False)
 
     weighted = sum(components[c] * w.get(c, 0.0) for c in components.columns)
     score = (weighted * 100.0).clip(0, 100)
