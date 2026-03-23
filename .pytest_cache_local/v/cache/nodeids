@@ -33,6 +33,7 @@
   "tests/test_explainability_engine.py::test_quality_explainability_normalizes_missing_quality_tier",
   "tests/test_explainability_engine.py::test_quality_explainability_sanitizes_non_finite_json_values",
   "tests/test_feature_builder.py::test_build_feature_table_does_not_fallback_to_segmented_caches_for_custom_missing_path",
+  "tests/test_feature_builder.py::test_build_feature_table_resolves_repo_relative_cache_paths_from_notebooks_dir",
   "tests/test_feature_builder.py::test_build_feature_table_uses_selected_benchmark",
   "tests/test_fixed_income_pipeline_basic.py::test_fixed_income_pipeline_handles_empty_refresh_without_crashing",
   "tests/test_fixed_income_pipeline_basic.py::test_fixed_income_pipeline_writes_cache_and_report",

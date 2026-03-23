@@ -7,6 +7,7 @@ multitasking<0.0.12
 lxml
 html5lib
 plotly>=5.18.0
+matplotlib
 requests
 altair<5
 streamlit-aggrid==1.0.5

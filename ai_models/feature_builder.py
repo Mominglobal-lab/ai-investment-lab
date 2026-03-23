@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
+
+from ai_models.path_utils import resolve_project_path
 
 
 FUNDAMENTALS_PATH = "data/fundamentals_cache.parquet"
@@ -21,8 +24,9 @@ class FeatureBuildResult:
 
 
 def _safe_read_parquet(path: str) -> pd.DataFrame | None:
+    resolved = resolve_project_path(path)
     try:
-        return pd.read_parquet(path)
+        return pd.read_parquet(resolved)
     except Exception:
         return None
 
@@ -35,8 +39,8 @@ def _load_fundamentals(fundamentals_path: str) -> tuple[pd.DataFrame, list[str]]
         # For custom paths, silently mixing in unrelated segmented universes can corrupt runs.
         if fundamentals_path == FUNDAMENTALS_PATH:
             fallback_paths = [
-                "data/fundamentals_cache_sp500.parquet",
-                "data/fundamentals_cache_nasdaq100.parquet",
+                str(Path("data") / "fundamentals_cache_sp500.parquet"),
+                str(Path("data") / "fundamentals_cache_nasdaq100.parquet"),
             ]
             frames: list[pd.DataFrame] = []
             for fp in fallback_paths:

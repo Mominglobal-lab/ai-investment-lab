@@ -5,10 +5,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from ai_models.path_utils import resolve_project_path
+
 
 def _safe_read(path: str) -> pd.DataFrame | None:
+    resolved = resolve_project_path(path)
     try:
-        return pd.read_parquet(path)
+        return pd.read_parquet(resolved)
     except Exception:
         return None
 

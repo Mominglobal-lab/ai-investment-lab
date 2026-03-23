@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import pandas as pd
 
 from ai_models.feature_builder import build_feature_table
@@ -88,3 +90,20 @@ def test_build_feature_table_does_not_fallback_to_segmented_caches_for_custom_mi
     )
 
     assert any("missing_custom_fundamentals.parquet" in w for w in out.warnings)
+
+
+def test_build_feature_table_resolves_repo_relative_cache_paths_from_notebooks_dir():
+    original_cwd = os.getcwd()
+    try:
+        os.chdir("notebooks")
+        out = build_feature_table(
+            fundamentals_path="data/fundamentals_cache.parquet",
+            prices_path="data/prices_cache.parquet",
+            treasury_path="data/treasury_yields_cache.parquet",
+            benchmark_ticker="SPY",
+        )
+    finally:
+        os.chdir(original_cwd)
+
+    assert not out.features.empty
+    assert out.input_coverage["prices_rows"] > 0
