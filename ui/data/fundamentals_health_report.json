@@ -1,0 +1,52 @@
+{
+  "run_id": "20260305T170817Z",
+  "run_timestamp_utc": "2026-03-05T17:08:17+00:00",
+  "universe": "S&P 500",
+  "tickers_requested": 503,
+  "tickers_ok": 503,
+  "tickers_partial": 0,
+  "tickers_failed": 0,
+  "rate_limited": false,
+  "top_missing_fields": [
+    {
+      "field": "PEG_Ratio",
+      "missing_count": 244
+    },
+    {
+      "field": "Earnings_Growth_Pct",
+      "missing_count": 65
+    },
+    {
+      "field": "ROE",
+      "missing_count": 30
+    },
+    {
+      "field": "Rule_of_40",
+      "missing_count": 29
+    },
+    {
+      "field": "Revenue_Growth_YoY_Pct",
+      "missing_count": 28
+    },
+    {
+      "field": "EBITDA_Margin",
+      "missing_count": 1
+    },
+    {
+      "field": "Close",
+      "missing_count": 0
+    },
+    {
+      "field": "MarketCap",
+      "missing_count": 0
+    },
+    {
+      "field": "PE_Ratio",
+      "missing_count": 0
+    }
+  ],
+  "errors_sample": [],
+  "cache_path": "data/fundamentals_cache.parquet",
+  "cache_written": true,
+  "notes": "cache updated"
+}

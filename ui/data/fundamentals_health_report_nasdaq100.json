@@ -1,0 +1,11 @@
+{
+  "run_timestamp": "2026-03-19T16:22:37.680410+00:00",
+  "universe": "Nasdaq 100",
+  "requested_count": 101,
+  "success_count": 101,
+  "failure_count": 0,
+  "rate_limited": false,
+  "wrote_cache": true,
+  "reason": "cache updated",
+  "errors_sample": []
+}

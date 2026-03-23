@@ -1,0 +1,75 @@
+{
+  "created_at": "2026-03-19T18:46:06.019872+00:00",
+  "window_settings_used": {
+    "baseline_start": "2025-01-08 00:00:00",
+    "baseline_end": "2025-12-25 00:00:00",
+    "current_start": "2025-12-26 00:00:00",
+    "current_end": "2026-03-19 00:00:00"
+  },
+  "top_drifting_features": [
+    {
+      "MetricName": "YC_Slope_10Y_2Y_y",
+      "DriftScore": 7.121451993210248,
+      "DriftLevel": "Severe"
+    },
+    {
+      "MetricName": "BenchmarkVolatility_63d",
+      "DriftScore": 6.7647758806327065,
+      "DriftLevel": "Severe"
+    },
+    {
+      "MetricName": "MaxDrawdown_252d",
+      "DriftScore": 0.03492478197189981,
+      "DriftLevel": "Stable"
+    },
+    {
+      "MetricName": "Volatility_63d",
+      "DriftScore": 0.01331235631869557,
+      "DriftLevel": "Stable"
+    },
+    {
+      "MetricName": "Momentum_252d",
+      "DriftScore": 0.008893904196695866,
+      "DriftLevel": "Stable"
+    }
+  ],
+  "top_drifting_signals": [
+    {
+      "MetricName": "RiskScoreVol_60d",
+      "DriftScore": 7.248949739790186,
+      "DriftLevel": "Drift"
+    },
+    {
+      "MetricName": "RegimeFlipRate_60d",
+      "DriftScore": 0.13333333333333333,
+      "DriftLevel": "Drift"
+    },
+    {
+      "MetricName": "QualityProxyDrift",
+      "DriftScore": 2.1541688611786536e-05,
+      "DriftLevel": "Stable"
+    }
+  ],
+  "data_coverage_stats": {
+    "prices_rows": 648139,
+    "feature_history_rows": 648139,
+    "treasury_exists": true,
+    "expected_min_price_rows": 50000,
+    "missing_counts": {
+      "Momentum_252d": 131139,
+      "Volatility_63d": 5210,
+      "MaxDrawdown_252d": 15109,
+      "BenchmarkVolatility_63d": 5090,
+      "RevenueGrowth": 16328,
+      "EBITDAMargin": 6279,
+      "ROE": 42703,
+      "FCFMargin": 648139,
+      "YC_Slope_10Y_2Y_x": 648139,
+      "YC_Slope_10Y_2Y_y": 5687
+    }
+  },
+  "warnings_and_fallbacks_used": [
+    "Fundamentals missing FreeCashFlow_Margin; FCFMargin unavailable."
+  ],
+  "short_narrative_summary": "Monitoring detected overall Severe drift. Top feature drivers count=5, top signal drivers count=3."
+}

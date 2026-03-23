@@ -1,0 +1,42 @@
+{
+  "created_at": "2026-03-19T18:46:06.035549+00:00",
+  "artifact_freshness": {
+    "drift_signals_cache": "fresh",
+    "alert_log": "fresh"
+  },
+  "coverage": {
+    "prices_rows": 648139,
+    "feature_history_rows": 648139,
+    "treasury_exists": true,
+    "expected_min_price_rows": 50000,
+    "missing_counts": {
+      "Momentum_252d": 131139,
+      "Volatility_63d": 5210,
+      "MaxDrawdown_252d": 15109,
+      "BenchmarkVolatility_63d": 5090,
+      "RevenueGrowth": 16328,
+      "EBITDAMargin": 6279,
+      "ROE": 42703,
+      "FCFMargin": 648139,
+      "YC_Slope_10Y_2Y_x": 648139,
+      "YC_Slope_10Y_2Y_y": 5687
+    }
+  },
+  "missing_feature_counts": {
+    "Momentum_252d": 131139,
+    "Volatility_63d": 5210,
+    "MaxDrawdown_252d": 15109,
+    "BenchmarkVolatility_63d": 5090,
+    "RevenueGrowth": 16328,
+    "EBITDAMargin": 6279,
+    "ROE": 42703,
+    "FCFMargin": 648139,
+    "YC_Slope_10Y_2Y_x": 648139,
+    "YC_Slope_10Y_2Y_y": 5687
+  },
+  "runtime_notes": [
+    "Monitoring uses PSI baseline/current windows with fallback shortening when history is limited."
+  ],
+  "alerts_generated_count": 5,
+  "worst_drift_level": "Severe"
+}

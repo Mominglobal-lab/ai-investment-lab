@@ -1,0 +1,11 @@
+{
+  "run_timestamp": "2026-03-19T17:06:31.336651+00:00",
+  "universe": "S&P 500",
+  "requested_count": 503,
+  "success_count": 503,
+  "failure_count": 0,
+  "rate_limited": false,
+  "wrote_cache": true,
+  "reason": "cache updated",
+  "errors_sample": []
+}

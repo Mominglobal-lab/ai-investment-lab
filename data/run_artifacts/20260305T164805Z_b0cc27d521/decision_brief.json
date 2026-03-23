@@ -1,0 +1,56 @@
+{
+  "metadata": {
+    "run_timestamp": "2026-03-05T16:48:05.453920+00:00",
+    "period_start": "2021-03-08",
+    "period_end": "2026-03-05",
+    "rebalance_rule": "none",
+    "benchmark_ticker": "SPY, QQQ, IWM, DIA",
+    "simulation_mode": "historical",
+    "run_id": "20260305T164805Z_b0cc27d521",
+    "export_timestamp": "2026-03-05T16:48:45.829419+00:00",
+    "title": "Portfolio Decision Brief"
+  },
+  "portfolio": {
+    "holdings": [
+      {
+        "ticker": "AAPL",
+        "weight": 0.25
+      },
+      {
+        "ticker": "MSFT",
+        "weight": 0.25
+      },
+      {
+        "ticker": "NVDA",
+        "weight": 0.25
+      },
+      {
+        "ticker": "GOOGL",
+        "weight": 0.25
+      }
+    ],
+    "dropped_tickers": [],
+    "warnings": [],
+    "weighting_mode": "Equal weight"
+  },
+  "summary": {
+    "CAGR": 0.40379320190973345,
+    "volatility": 0.34237977713906703,
+    "Sharpe_ratio": 1.1793722318643887,
+    "max_drawdown": -0.4243727381948119,
+    "worst_day": -0.11657667464152033,
+    "worst_month": -0.1925796443444957,
+    "VaR_95": -0.0326984058701947,
+    "CVaR_95": -0.04632139993698225,
+    "correlation_with_benchmark": NaN,
+    "beta_relative_to_benchmark": NaN
+  },
+  "scenario": null,
+  "decision_insights": [
+    "Drawdown severity: severe (max drawdown worse than -35%)."
+  ],
+  "files": {
+    "json": "20260305T164805Z_b0cc27d521/decision_brief.json",
+    "html": "20260305T164805Z_b0cc27d521/decision_brief.html"
+  }
+}

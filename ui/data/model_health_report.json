@@ -1,0 +1,46 @@
+{
+  "generated_at": "2026-03-10T12:07:43.915205+00:00",
+  "model_freshness": {
+    "quality_scores_cache": "fresh",
+    "regime_cache": "fresh",
+    "risk_signals_cache": "fresh"
+  },
+  "input_cache_coverage": {
+    "fundamentals_cache": {
+      "exists": true,
+      "schema_ok": true
+    },
+    "prices_cache": {
+      "exists": true,
+      "schema_ok": true
+    },
+    "treasury_yields_cache": {
+      "exists": false
+    }
+  },
+  "missing_data_warnings": [
+    "Treasury yield cache unavailable; macro yield features set to neutral defaults."
+  ],
+  "feature_availability_indicators": {
+    "fundamentals_rows": 503,
+    "prices_rows": 648020,
+    "feature_rows": 521,
+    "treasury_rows": 0,
+    "missing_counts": {
+      "Momentum_12M": 1,
+      "Volatility_63D": 0,
+      "Drawdown_252D": 0,
+      "Return_21D": 0,
+      "Revenue_Growth_YoY_Pct": 46,
+      "EBITDA_Margin": 19,
+      "ROE": 48,
+      "FreeCashFlow_Margin": 521,
+      "Benchmark_Volatility": 0,
+      "Benchmark_Trend": 0,
+      "YC_10Y_2Y": 521,
+      "YC_10Y_3M": 521,
+      "YC_Inversion": 0,
+      "YC_Volatility": 521
+    }
+  }
+}
