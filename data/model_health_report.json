@@ -1,0 +1,80 @@
+{
+  "generated_at": "2026-03-19T18:46:06.035549+00:00",
+  "model_freshness": {
+    "quality_scores_cache": "fresh",
+    "regime_cache": "fresh",
+    "risk_signals_cache": "fresh"
+  },
+  "input_cache_coverage": {
+    "fundamentals_cache": {
+      "exists": true,
+      "schema_ok": true
+    },
+    "prices_cache": {
+      "exists": true,
+      "schema_ok": true
+    },
+    "treasury_yields_cache": {
+      "exists": true
+    }
+  },
+  "missing_data_warnings": [],
+  "feature_availability_indicators": {
+    "fundamentals_rows": 517,
+    "prices_rows": 648139,
+    "feature_rows": 521,
+    "treasury_rows": 2607,
+    "missing_counts": {
+      "Momentum_12M": 1,
+      "Volatility_63D": 0,
+      "Drawdown_252D": 0,
+      "Return_21D": 0,
+      "Revenue_Growth_YoY_Pct": 13,
+      "EBITDA_Margin": 5,
+      "ROE": 34,
+      "FreeCashFlow_Margin": 521,
+      "Benchmark_Volatility": 0,
+      "Benchmark_Trend": 0,
+      "YC_10Y_2Y": 0,
+      "YC_10Y_3M": 0,
+      "YC_Inversion": 0,
+      "YC_Volatility": 0
+    }
+  },
+  "explanation_coverage": {
+    "quality_explanations_cache": {
+      "rows": 521,
+      "path": "data/quality_explanations_cache.parquet"
+    },
+    "regime_evidence_cache": {
+      "rows": 1256,
+      "path": "data/regime_evidence_cache.parquet"
+    },
+    "risk_evidence_cache": {
+      "rows": 1255,
+      "path": "data/risk_evidence_cache.parquet"
+    }
+  },
+  "uncertainty_coverage": {
+    "quality_uncertainty_cache": {
+      "rows": 521,
+      "path": "data/quality_uncertainty_cache.parquet"
+    },
+    "regime_probabilities_cache": {
+      "rows": 1256,
+      "path": "data/regime_probabilities_cache.parquet"
+    },
+    "risk_uncertainty_cache": {
+      "rows": 1255,
+      "path": "data/risk_uncertainty_cache.parquet"
+    }
+  },
+  "runtime_notes": [
+    "Quality uncertainty uses deterministic bootstrap with seed=42."
+  ],
+  "monitoring_summary": {
+    "drift_signals_rows": 13,
+    "alerts_rows": 5,
+    "worst_drift_level": "Severe"
+  }
+}

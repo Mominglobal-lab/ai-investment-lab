@@ -1,0 +1,52 @@
+{
+  "run_id": "20260319T180127Z",
+  "run_timestamp_utc": "2026-03-19T18:01:27+00:00",
+  "universe": "Nasdaq 100",
+  "tickers_requested": 101,
+  "tickers_ok": 101,
+  "tickers_partial": 0,
+  "tickers_failed": 0,
+  "rate_limited": false,
+  "top_missing_fields": [
+    {
+      "field": "PEG_Ratio",
+      "missing_count": 52
+    },
+    {
+      "field": "Earnings_Growth_Pct",
+      "missing_count": 14
+    },
+    {
+      "field": "ROE",
+      "missing_count": 5
+    },
+    {
+      "field": "Revenue_Growth_YoY_Pct",
+      "missing_count": 2
+    },
+    {
+      "field": "Rule_of_40",
+      "missing_count": 2
+    },
+    {
+      "field": "Close",
+      "missing_count": 0
+    },
+    {
+      "field": "EBITDA_Margin",
+      "missing_count": 0
+    },
+    {
+      "field": "MarketCap",
+      "missing_count": 0
+    },
+    {
+      "field": "PE_Ratio",
+      "missing_count": 0
+    }
+  ],
+  "errors_sample": [],
+  "cache_path": "data/fundamentals_cache_nasdaq100.parquet",
+  "cache_written": true,
+  "notes": "cache updated"
+}

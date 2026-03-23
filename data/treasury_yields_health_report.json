@@ -1,0 +1,11 @@
+{
+  "run_timestamp": "2026-03-19T18:42:42.135374+00:00",
+  "cache_path": "data/treasury_yields_cache.parquet",
+  "row_count": 2607,
+  "columns": [
+    "Date",
+    "10Y",
+    "2Y",
+    "3M"
+  ]
+}

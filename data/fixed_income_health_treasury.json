@@ -1,0 +1,36 @@
+{
+  "run_id": "20260319T180129Z",
+  "run_timestamp_utc": "2026-03-19T18:01:29+00:00",
+  "universe": "US Treasuries",
+  "tickers_requested": 7,
+  "tickers_ok": 7,
+  "tickers_partial": 0,
+  "tickers_failed": 0,
+  "rate_limited": false,
+  "top_missing_fields": [
+    {
+      "field": "Expense_Ratio_Pct",
+      "missing_count": 7
+    },
+    {
+      "field": "AUM",
+      "missing_count": 0
+    },
+    {
+      "field": "Duration_Years",
+      "missing_count": 0
+    },
+    {
+      "field": "Price",
+      "missing_count": 0
+    },
+    {
+      "field": "Yield_Pct",
+      "missing_count": 0
+    }
+  ],
+  "errors_sample": [],
+  "cache_path": "data/fixed_income_cache_treasury.parquet",
+  "cache_written": true,
+  "notes": "cache updated"
+}

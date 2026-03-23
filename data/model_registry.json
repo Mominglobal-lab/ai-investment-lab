@@ -1,0 +1,105 @@
+{
+  "generated_at": "2026-03-19T18:46:06.035549+00:00",
+  "models": [
+    {
+      "model_name": "quality_score_model",
+      "model_version": "1.0.0",
+      "feature_set_used": [
+        "Revenue_Growth_YoY_Pct",
+        "EBITDA_Margin",
+        "ROE",
+        "FreeCashFlow_Margin",
+        "Volatility_63D",
+        "Drawdown_252D"
+      ],
+      "training_or_evaluation_window": "cross-sectional latest snapshot",
+      "timestamp": "2026-03-19T18:44:56.565446+00:00",
+      "evaluation_summary": {
+        "rows_scored": 521,
+        "score_min": 17.364676457873742,
+        "score_max": 77.86188300759298
+      }
+    },
+    {
+      "model_name": "regime_detection_model",
+      "model_version": "1.0.0",
+      "feature_set_used": [
+        "YieldSlope",
+        "YieldInverted",
+        "YieldVolatility",
+        "Benchmark_Volatility",
+        "Benchmark_Trend"
+      ],
+      "training_or_evaluation_window": "daily rule-based regime classification",
+      "timestamp": "2026-03-19T18:44:56.565446+00:00",
+      "evaluation_summary": {
+        "rows_scored": 1256,
+        "latest_regime": "Neutral"
+      }
+    },
+    {
+      "model_name": "risk_detector",
+      "model_version": "1.0.0",
+      "feature_set_used": [
+        "volatility_expansion",
+        "drawdown_acceleration",
+        "correlation_spike",
+        "yield_inversion",
+        "rate_shock"
+      ],
+      "training_or_evaluation_window": "daily rule-based systemic risk scoring",
+      "timestamp": "2026-03-19T18:44:56.565446+00:00",
+      "evaluation_summary": {
+        "rows_scored": 1255,
+        "latest_risk_level": "Low"
+      }
+    },
+    {
+      "model_name": "explainability_layer",
+      "model_version": "1.0.0",
+      "feature_set_used": [
+        "quality component percentiles",
+        "yield curve and benchmark regime indicators",
+        "systemic risk indicator decomposition"
+      ],
+      "training_or_evaluation_window": "latest cached artifacts",
+      "timestamp": "2026-03-19T18:45:00.212427+00:00",
+      "evaluation_summary": {
+        "quality_explanations_rows": 521,
+        "regime_evidence_rows": 1256,
+        "risk_evidence_rows": 1255
+      }
+    },
+    {
+      "model_name": "uncertainty_layer",
+      "model_version": "1.0.0",
+      "feature_set_used": [
+        "quality bootstrap score bands",
+        "regime confidence-to-probability mapping",
+        "risk rolling movement bands"
+      ],
+      "training_or_evaluation_window": "latest cached artifacts",
+      "timestamp": "2026-03-19T18:45:10.867901+00:00",
+      "evaluation_summary": {
+        "quality_uncertainty_rows": 521,
+        "regime_probabilities_rows": 1256,
+        "risk_uncertainty_rows": 1255
+      }
+    },
+    {
+      "model_name": "monitoring_layer",
+      "model_version": "1.0.0",
+      "feature_set_used": [
+        "PSI feature drift",
+        "regime/risk instability metrics",
+        "rule-based alerts"
+      ],
+      "training_or_evaluation_window": "rolling baseline/current windows",
+      "timestamp": "2026-03-19T18:46:06.035549+00:00",
+      "evaluation_summary": {
+        "drift_rows": 13,
+        "alerts_rows": 5
+      }
+    }
+  ]
+}

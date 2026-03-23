@@ -1,0 +1,10 @@
+{
+  "run_timestamp": "2026-03-19T18:01:30.379994+00:00",
+  "cache_path": "data/fixed_income_cache.parquet",
+  "source_labels": [
+    "US Treasuries",
+    "Bond ETFs"
+  ],
+  "row_count": 14,
+  "schema_ok": true
+}

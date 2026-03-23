@@ -1,0 +1,12 @@
+{
+  "run_timestamp": "2026-03-19T18:44:51.125469+00:00",
+  "tickers_requested": 521,
+  "tickers_successfully_fetched": 521,
+  "tickers_failed": 0,
+  "period_start": "2021-03-19T00:00:00",
+  "period_end": "2026-03-19T00:00:00",
+  "cache_timestamp": "2026-03-19T18:44:51.125469+00:00",
+  "wrote_cache": true,
+  "reason": "cache updated",
+  "errors_sample": []
+}

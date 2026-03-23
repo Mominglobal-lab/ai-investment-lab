@@ -1,0 +1,10 @@
+{
+  "run_timestamp": "2026-03-19T18:01:27.736805+00:00",
+  "cache_path": "data/fundamentals_cache.parquet",
+  "source_labels": [
+    "S&P 500",
+    "Nasdaq 100"
+  ],
+  "row_count": 517,
+  "schema_ok": true
+}

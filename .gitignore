@@ -38,6 +38,28 @@ Thumbs.db
 
 # Local app/runtime artifacts
 data/
+!data/
+!data/fundamentals_cache.parquet
+!data/fundamentals_cache_sp500.parquet
+!data/fundamentals_cache_nasdaq100.parquet
+!data/fundamentals_health_report.json
+!data/fundamentals_health_report_sp500.json
+!data/fundamentals_health_report_nasdaq100.json
+!data/fixed_income_cache.parquet
+!data/fixed_income_cache_treasury.parquet
+!data/fixed_income_cache_bond_etf.parquet
+!data/fixed_income_health_report.json
+!data/fixed_income_health_treasury.json
+!data/fixed_income_health_bond_etf.json
+!data/prices_cache.parquet
+!data/prices_health_report.json
+!data/quality_scores_cache.parquet
+!data/regime_cache.parquet
+!data/risk_signals_cache.parquet
+!data/model_registry.json
+!data/model_health_report.json
+!data/treasury_yields_cache.parquet
+!data/treasury_yields_health_report.json
 *.log
 
 # Streamlit local secrets/config overrides
