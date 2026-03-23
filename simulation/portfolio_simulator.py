@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Iterable
 
 import numpy as np
 import pandas as pd
 
 
-PRICE_CACHE_PATH = "data/prices_cache.parquet"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PRICE_CACHE_PATH = PROJECT_ROOT / "data" / "prices_cache.parquet"
 PRICE_SCHEMA_COLUMNS = ["Ticker", "Date", "AdjClose", "Close", "Volume"]
 TRADING_DAYS_PER_YEAR = 252.0
 INITIAL_CAPITAL = 10_000.0
@@ -40,7 +42,7 @@ def _iso_dates(index: pd.Index) -> list[str]:
     return [d.strftime("%Y-%m-%d") for d in dt_idx if pd.notna(d)]
 
 
-def _load_prices_cache(path: str = PRICE_CACHE_PATH) -> pd.DataFrame:
+def _load_prices_cache(path: str | Path = PRICE_CACHE_PATH) -> pd.DataFrame:
     df = pd.read_parquet(path)
     missing = [c for c in PRICE_SCHEMA_COLUMNS if c not in df.columns]
     if missing:
