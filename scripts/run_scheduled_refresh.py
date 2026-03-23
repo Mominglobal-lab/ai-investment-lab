@@ -68,9 +68,34 @@ SAVED_PORTFOLIO_ARTIFACTS = (
 
 
 def _print_result(label: str, result) -> None:
-    row_count = int(len(result.data)) if getattr(result, "data", None) is not None else 0
+    data_like = getattr(result, "data", None)
+    wrote_flag = getattr(result, "wrote_cache", None)
+
+    if data_like is None:
+        for attr in (
+            "quality_scores",
+            "regime_signals",
+            "risk_signals",
+            "quality_explanations",
+            "regime_evidence",
+            "risk_evidence",
+            "quality_uncertainty",
+            "regime_probabilities",
+            "risk_uncertainty",
+            "drift_signals",
+            "alerts",
+        ):
+            value = getattr(result, attr, None)
+            if value is not None:
+                data_like = value
+                break
+
+    if wrote_flag is None:
+        wrote_flag = getattr(result, "wrote_artifacts", False)
+
+    row_count = int(len(data_like)) if data_like is not None else 0
     print(
-        f"{label}: rows={row_count} wrote_cache={getattr(result, 'wrote_cache', False)} "
+        f"{label}: rows={row_count} wrote_cache={wrote_flag} "
         f"reason={getattr(result, 'reason', 'n/a')}",
         flush=True,
     )
@@ -228,7 +253,14 @@ def _write_union_cache(
     source_labels: list[str],
 ) -> pd.DataFrame:
     combined = _combine_frames(frames, schema, key_col)
-    save_parquet_atomic(combined, cache_path)
+    cache_exists = Path(cache_path).exists()
+    wrote_cache = False
+    notes = "cache updated"
+    if combined.empty:
+        notes = "no non-empty source frames produced; retained existing union cache" if cache_exists else "no non-empty source frames produced"
+    else:
+        save_parquet_atomic(combined, cache_path)
+        wrote_cache = True
     write_json_report(
         {
             "run_timestamp": pd.Timestamp.utcnow().isoformat(),
@@ -236,6 +268,8 @@ def _write_union_cache(
             "source_labels": source_labels,
             "row_count": int(len(combined)),
             "schema_ok": list(combined.columns) == list(schema),
+            "wrote_cache": bool(wrote_cache),
+            "notes": notes,
         },
         health_path,
     )
@@ -354,6 +388,8 @@ def main() -> int:
         started_at = _stage_start("treasury refresh")
         refresh_treasury_yields()
         _stage_end("treasury refresh", started_at)
+    else:
+        print("[SKIP] treasury refresh", flush=True)
 
     if not args.skip_prices:
         started_at = _stage_start("prices refresh")
@@ -370,6 +406,8 @@ def main() -> int:
         )
         _print_result("prices", prices_result)
         _stage_end("prices refresh", started_at)
+    else:
+        print("[SKIP] prices refresh", flush=True)
 
     needs_models = not args.skip_models
     needs_explainability = not args.skip_explainability
@@ -381,29 +419,39 @@ def main() -> int:
         model_result = run_decision_models_pipeline(benchmark_ticker=str(args.benchmark).strip().upper())
         _print_result("models", model_result)
         _stage_end("model artifacts", started_at)
+    else:
+        print("[SKIP] model artifacts", flush=True)
 
     if needs_explainability:
         started_at = _stage_start("explainability artifacts")
         explain_result = run_explainability_pipeline(benchmark_ticker=str(args.benchmark).strip().upper())
         _print_result("explainability", explain_result)
         _stage_end("explainability artifacts", started_at)
+    else:
+        print("[SKIP] explainability artifacts", flush=True)
 
     if needs_uncertainty:
         started_at = _stage_start("uncertainty artifacts")
         uncertainty_result = run_uncertainty_pipeline(benchmark_ticker=str(args.benchmark).strip().upper())
         _print_result("uncertainty", uncertainty_result)
         _stage_end("uncertainty artifacts", started_at)
+    else:
+        print("[SKIP] uncertainty artifacts", flush=True)
 
     if needs_monitoring:
         started_at = _stage_start("monitoring artifacts")
         monitoring_result = run_monitoring_pipeline(benchmark_ticker=str(args.benchmark).strip().upper())
         _print_result("monitoring", monitoring_result)
         _stage_end("monitoring artifacts", started_at)
+    else:
+        print("[SKIP] monitoring artifacts", flush=True)
 
     if not args.skip_portfolio_artifacts:
         started_at = _stage_start("portfolio artifacts")
         refresh_saved_portfolio_artifacts(max_entries=max(int(args.portfolio_max_entries), 1))
         _stage_end("portfolio artifacts", started_at)
+    else:
+        print("[SKIP] portfolio artifacts", flush=True)
 
     print("scheduled refresh complete", flush=True)
     return 0
